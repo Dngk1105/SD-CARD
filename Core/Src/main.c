@@ -59,6 +59,8 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+char writeBuf[] = "Hello STM32F429 DMA SPI!\r\n";
+BYTE readBuf[100];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
