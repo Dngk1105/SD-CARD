@@ -5,54 +5,69 @@
  *      Author: PC
  */
 #include "app_storage.h"
+#include "app_comm.h"
+#include "app_freertos.h"
+#include "fatfs.h"
+#include <string.h>
 
-
-uint8_t work_buffer[BENCH_CHUNK_SIZE];
 void Task_Storage_Handler(void *pvParameters) {
     FATFS fs;
-    FIL fil;
-    UINT bw;
+    UART_Packet_t rx_packet;
+	UART_Packet_t tx_packet;
 
-    // Tắt cả 2 đèn trước khi bắt đầu
+    // Tat LED
     HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
 
-    /* --- BƯỚC 1: MOUNT THẺ SD --- */
+    // Mount sd
     if (f_mount(&fs, "", 1) != FR_OK) {
-        // Lỗi: Bật LED Đỏ
+        // Loi: Bat LED G14
         HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_SET);
-        vTaskDelete(NULL);
-    }
-
-    /* --- BƯỚC 2: TIẾN HÀNH BÀI TEST GHI --- */
-    if (f_open(&fil, "bench.dat", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
-
-        memset(work_buffer, 0xAA, BENCH_CHUNK_SIZE);
-
-        // Vòng lặp bắn 1MB data
-        for (uint32_t i = 0; i < (BENCH_FILE_SIZE / BENCH_CHUNK_SIZE); i++) {
-            if (f_write(&fil, work_buffer, BENCH_CHUNK_SIZE, &bw) != FR_OK || bw != BENCH_CHUNK_SIZE) {
-                // Lỗi ghi: Bật Đỏ, tắt Xanh, đóng file
-                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_SET);
-                HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13, GPIO_PIN_RESET);
-                f_close(&fil);
-                vTaskDelete(NULL);
-            }
-
-            // Đang ghi: Nháy đèn Xanh liên tục
-            HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_13);
-        }
-
-        f_close(&fil);
-
-        // THÀNH CÔNG: Tắt đèn Đỏ, Bật đèn Xanh sáng cố định
-        HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13, GPIO_PIN_SET);
-
     } else {
-        // Lỗi không tạo được file: Bật LED Đỏ
-        HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_SET);
+    	HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13, GPIO_PIN_SET);
     }
 
-    /* Xong việc -> Hủy Task */
-    vTaskDelete(NULL);
+    while (1){
+    	// Cho du lieu trong queue gui tu uart
+    	if (xQueueReceive(qUartToStorage, &rx_packet, portMAX_DELAY) == pdPASS){
+    		// reset packet
+    		memset(&tx_packet, 0, sizeof(UART_Packet_t));
+
+    		switch (rx_packet.cmd) {
+				case CMD_SYS_PING_REQ:
+					// TEST 1: PC ping STM32 -> STM32 Pong
+					tx_packet.cmd = CMD_SYS_PING_ACK;
+					tx_packet.length = 4;
+					memcpy(tx_packet.payload, "PONG", 4);
+
+					xQueueSend(qStorageToUart, &tx_packet, 0);
+					break;
+
+				case CMD_GET_SYS_INFO_REQ:
+					// TEST 2: PC xin info -> tra string de test
+					tx_packet.cmd = CMD_GET_SYS_INFO_ACK;
+					char info_msg[] = "SD OK, 32GB Free";
+					tx_packet.length = strlen(info_msg);
+					memcpy(tx_packet.payload, info_msg, tx_packet.length);
+
+					xQueueSend(qStorageToUart, &tx_packet, 0);
+					break;
+
+
+				case CMD_SYS_PING_ACK:
+				case CMD_GET_SYS_INFO_ACK:
+				case CMD_DATA_CHUNK_ACK:
+				case CMD_ERROR_ACK:
+					break;
+				default:
+					// Lenh khong ton tai, tra ma loi
+					tx_packet.cmd = CMD_ERROR_ACK;
+					tx_packet.length = 1;
+					tx_packet.payload[0] = 0xEE;
+
+					xQueueSend(qStorageToUart, &tx_packet, 0);
+					break;
+			}
+
+    	}
+    }
 }

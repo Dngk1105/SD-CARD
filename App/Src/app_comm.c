@@ -172,15 +172,15 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 }
 
 void Task_Comm_Handler(void *pvParameters) {
-    uint8_t tx_payload[MAX_PAYLOAD_SIZE]; // Payload tu sd
+    UART_Packet_t tx_packet;
 
     App_Comm_Init();
 
     while(1) {
         // Cho cho den khi storage task nhem data vao
-        if (xQueueReceive(qStorageToUart, tx_payload, portMAX_DELAY) == pdPASS) {
+        if (xQueueReceive(qStorageToUart, &tx_packet, portMAX_DELAY) == pdPASS) {
         	// Truyen frame
-        	App_Comm_SendFrame(CMD_DATA_CHUNK, tx_payload, 512);;
+        	App_Comm_SendFrame(tx_packet.cmd, tx_packet.payload, tx_packet.length);;
         }
     }
 }
