@@ -36,12 +36,14 @@ typedef enum {
 	CMD_GET_SYS_INFO_REQ    = 0x01,
 	CMD_DIR_READ_REQ        = 0x02,
 	CMD_FILE_READ_REQ       = 0x03,
+	CMD_BENCHMARK_REQ		= 0x06,
 
 	// Lenh tu STM32
 	CMD_SYS_PING_ACK        = 0x80,
 	CMD_GET_SYS_INFO_ACK    = 0x81,
 	CMD_DATA_CHUNK_ACK      = 0x90,
-	CMD_ERROR_ACK           = 0xFF
+	CMD_ERROR_ACK           = 0xFF,
+	CMD_BENCHMARK_DATA      = 0x96
 } CommandID_t;
 
 

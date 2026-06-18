@@ -28,7 +28,7 @@ SemaphoreHandle_t semUartTx;
 void App_FreeRTOS_Init(void) {
 	// Khoi tao queue
 	qUartToStorage = xQueueCreate(5, sizeof(UART_Packet_t));	// Chua toi da 5 lenh gui tu PC
-	qStorageToUart = xQueueCreate(2, sizeof(UART_Packet_t));	// Chua 2 block data gui tu sd
+	qStorageToUart = xQueueCreate(8, sizeof(UART_Packet_t));	// Chua 8 block data gui tu sd
 
 
 
