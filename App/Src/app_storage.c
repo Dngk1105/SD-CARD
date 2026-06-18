@@ -11,20 +11,28 @@
 #include <stdio.h>
 #include <string.h>
 
+// Semaphore cho bien trang thai
+UI_Transfer_Live_t g_live_status = {0};
+SemaphoreHandle_t xMutex_UI_Live = NULL;
+
 void Task_Storage_Handler(void *pvParameters) {
     FATFS fs;
     UART_Packet_t rx_packet;
 	UART_Packet_t tx_packet;
+	FRESULT fr;
 
-    // Tat LED
-    HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
+	// Khoi tao mutex
+	xMutex_UI_Live = xSemaphoreCreateMutex();
 
     // Mount sd
+    HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
     if (f_mount(&fs, "", 1) != FR_OK) {
         // Loi: Bat LED G14
         HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_SET);
+        g_live_status.is_mounted = 0;
     } else {
     	HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13, GPIO_PIN_SET);
+        g_live_status.is_mounted = 1;
     }
 
     while (1){
@@ -42,7 +50,6 @@ void Task_Storage_Handler(void *pvParameters) {
 
 					xQueueSend(qStorageToUart, &tx_packet, 0);
 					break;
-
 				case CMD_GET_SYS_INFO_REQ:
 					// TEST 2: PC xin info -> tra string de test
 					tx_packet.cmd = CMD_GET_SYS_INFO_ACK;
@@ -52,79 +59,30 @@ void Task_Storage_Handler(void *pvParameters) {
 
 					xQueueSend(qStorageToUart, &tx_packet, 0);
 					break;
+				case CMD_DIR_READ_REQ:
+				case CMD_FILE_READ_REQ:
+				case CMD_GET_VOL_INFO_REQ:
+				case CMD_DIR_OPEN_REQ:
+				case CMD_FILE_DELETE_REQ:
+				case CMD_DIR_CREATE_REQ:
+				case CMD_FILE_WRITE_START_REQ:
+				case CMD_FILE_WRITE_DATA_REQ:
+				case CMD_FILE_WRITE_END_REQ:
+				case CMD_GET_UI_STATUS_REQ:
+					break;
 
-				case CMD_BENCHMARK_REQ:
-				{
-				    FIL file;
-				    UINT bytes_read, bytes_written;
-				    uint32_t start_time, end_time, total_time_ms;
-				    float transfer_rate_kbps = 0.0f;
-				    FRESULT fr;
-
-				    static UART_Packet_t bench_packet;
-				    const uint32_t benchmark_size = 1024 * 1024; // 1 MegaByte
-				    uint32_t total_bytes_processed = 0;
-
-				    // open file
-				    fr = f_open(&file, "bench.dat", FA_READ);
-				    if (fr != FR_OK) {
-				        fr = f_open(&file, "bench.dat", FA_CREATE_ALWAYS | FA_WRITE);
-				        if (fr == FR_OK) {
-				            memset(bench_packet.payload, 0x5A, 512);
-				            for(uint32_t i = 0; i < 2048; i++) {
-				                f_write(&file, bench_packet.payload, 512, &bytes_written);
-				            }
-				            f_close(&file);
-				        }
-				        fr = f_open(&file, "bench.dat", FA_READ);
-				    }
-
-				    if (fr != FR_OK) {
-				        memset(&tx_packet, 0, sizeof(UART_Packet_t));
-				        tx_packet.cmd = CMD_BENCHMARK_REQ + 0x80;
-				        tx_packet.length = snprintf((char*)tx_packet.payload, MAX_PAYLOAD_SIZE, "FatFs Open Error: %d\r\n", fr);
-				        xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
-				        break;
-				    }
-
-				    bench_packet.cmd = CMD_BENCHMARK_DATA;
-				    bench_packet.length = 512;
-
-				    start_time = HAL_GetTick();
-
-				    while (total_bytes_processed < benchmark_size) {
-				        fr = f_read(&file, bench_packet.payload, 512, &bytes_read);
-				        if (fr != FR_OK || bytes_read == 0) {
-				            break;
-				        }
-
-				        xQueueSend(qStorageToUart, &bench_packet, portMAX_DELAY);
-				        total_bytes_processed += bytes_read;
-				    }
-
-				    f_close(&file);
-				    end_time = HAL_GetTick();
-
-				    total_time_ms = end_time - start_time;
-				    if (total_time_ms == 0) {
-				        total_time_ms = 1;
-				    }
-
-				    transfer_rate_kbps = ((float)total_bytes_processed / 1024.0f) / ((float)total_time_ms / 1000.0f);
-
-				    memset(&tx_packet, 0, sizeof(UART_Packet_t));
-				    tx_packet.cmd = CMD_BENCHMARK_REQ + 0x80;
-				    tx_packet.length = snprintf((char*)tx_packet.payload, MAX_PAYLOAD_SIZE,
-				                              "\r\n--- BENCHMARK RESULT ---\r\nProcessed: %lu Bytes\r\nTotal Time: %lu ms\r\nSpeed: %.2f KB/s\r\nLast Fr Code: %d\r\n",
-				                              total_bytes_processed, total_time_ms, transfer_rate_kbps, fr); // In thêm fr
-
-				    xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
-				    break;
-				}
 				case CMD_SYS_PING_ACK:
 				case CMD_GET_SYS_INFO_ACK:
 				case CMD_DATA_CHUNK_ACK:
 				case CMD_ERROR_ACK:
+				case CMD_BENCHMARK_DATA:
+				case CMD_GET_VOL_INFO_ACK:
+				case CMD_DIR_ENTRY_ACK:
+				case CMD_DIR_END_ACK:
+				case CMD_FILE_READ_START_ACK:
+				case CMD_FILE_READ_END_ACK:
+				case CMD_GENERIC_ACK:
+				case CMD_GET_UI_STATUS_ACK:
 					break;
 				default:
 					// Lenh khong ton tai, tra ma loi
