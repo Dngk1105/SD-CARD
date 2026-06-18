@@ -219,7 +219,8 @@ int wait_ready (	/* 1:Ready, 0:Timeout */
 	do {
 		d = xchg_spi(0xFF);
 		/* This loop takes a time. Insert rot_rdq() here for multitask envilonment. */
-		vTaskDelay(1);
+		//vTaskDelay(1);
+		taskYIELD();
 	} while (d != 0xFF && ((HAL_GetTick() - waitSpiTimerTickStart) < waitSpiTimerTickDelay));	/* Wait for card goes ready or timeout */
 
 	return (d == 0xFF) ? 1 : 0;
@@ -275,7 +276,8 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 	do {							/* Wait for DataStart token in timeout of 200ms */
 		token = xchg_spi(0xFF);
 		/* This loop will take a time. Insert rot_rdq() here for multitask envilonment. */
-		vTaskDelay(1);
+		//vTaskDelay(1);
+		taskYIELD();
 	} while ((token == 0xFF) && SPI_Timer_Status());
 	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
 
