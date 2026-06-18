@@ -28,6 +28,9 @@
 #include "user_diskio_spi.h"
 #include <string.h>
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 //Make sure you set #define SD_SPI_HANDLE as some hspix in main.h
 //Make sure you set #define SD_CS_GPIO_Port as some GPIO port in main.h
 //Make sure you set #define SD_CS_Pin as some GPIO pin in main.h
@@ -81,9 +84,11 @@ extern SPI_HandleTypeDef SD_SPI_HANDLE;
 static volatile
 DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
 
-// Co nhan dma hoan thanh day/thu du lieu
-volatile uint8_t spi_dma_tx_cplt = 0;
-volatile uint8_t spi_dma_rx_cplt = 0;
+//// Co nhan dma hoan thanh day/thu du lieu
+//volatile uint8_t spi_dma_tx_cplt = 0;
+//volatile uint8_t spi_dma_rx_cplt = 0;
+
+TaskHandle_t spiSDTaskHandle = NULL;
 
 // mang dummy de thuc hien receive du lieu trong che do song cong
 uint8_t spi_dummy_tx[512];
@@ -111,17 +116,27 @@ uint8_t SPI_Timer_Status() {
  * ,HAL_SPI_TransmitReceive_DMA() hoan tat
  */
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) spi_dma_tx_cplt = 1;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) spi_dma_rx_cplt = 1;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) {
-        spi_dma_rx_cplt = 1;
-    }
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 /*-----------------------------------------------------------------------*/
@@ -154,12 +169,14 @@ void rcvr_spi_multi (
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
-	spi_dma_rx_cplt = 0;
+	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
 	HAL_StatusTypeDef dma_status = HAL_SPI_TransmitReceive_DMA(&SD_SPI_HANDLE, spi_dummy_tx, buff, btr);
 
 	if (dma_status == HAL_OK) {
-		while(!spi_dma_rx_cplt) {}
+		ulTaskNotifyTake(pdTRUE, 1000);
 	}
+
+	spiSDTaskHandle = NULL;
 }
 
 
@@ -171,10 +188,13 @@ void xmit_spi_multi (
 	UINT btx			/* Number of bytes to send (even number) */
 )
 {
-	spi_dma_tx_cplt = 0;
+	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
+
 	if (HAL_SPI_Transmit_DMA(&SD_SPI_HANDLE, (uint8_t*)buff, btx) == HAL_OK) {
-		while(!spi_dma_tx_cplt) {}
+		ulTaskNotifyTake(pdTRUE, 1000);
 	}
+
+	spiSDTaskHandle = NULL;
 }
 #endif
 
@@ -199,6 +219,7 @@ int wait_ready (	/* 1:Ready, 0:Timeout */
 	do {
 		d = xchg_spi(0xFF);
 		/* This loop takes a time. Insert rot_rdq() here for multitask envilonment. */
+		vTaskDelay(1);
 	} while (d != 0xFF && ((HAL_GetTick() - waitSpiTimerTickStart) < waitSpiTimerTickDelay));	/* Wait for card goes ready or timeout */
 
 	return (d == 0xFF) ? 1 : 0;
@@ -254,6 +275,7 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 	do {							/* Wait for DataStart token in timeout of 200ms */
 		token = xchg_spi(0xFF);
 		/* This loop will take a time. Insert rot_rdq() here for multitask envilonment. */
+		vTaskDelay(1);
 	} while ((token == 0xFF) && SPI_Timer_Status());
 	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
 

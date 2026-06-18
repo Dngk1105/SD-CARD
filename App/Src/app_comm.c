@@ -133,6 +133,7 @@ void App_Comm_SendFrame(CommandID_t cmd, uint8_t *payload, uint16_t len) {
     tx_dma_buf[frame_idx++] = cmd;
     checksum = cmd;
 
+    //Length
     tx_dma_buf[frame_idx++] = (uint8_t)(len & 0xFF);        // LEN Low
     checksum ^= (uint8_t)(len & 0xFF);
     tx_dma_buf[frame_idx++] = (uint8_t)((len >> 8) & 0xFF); // LEN High
@@ -171,6 +172,11 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
     }
 }
 
+/* Task nhan trach nhiem day cac packet qua uart
+ * Lay cac packet tu queue
+ * Chi gui khi queue co du lieu
+ * Khong co se blocked
+ */
 void Task_Comm_Handler(void *pvParameters) {
     UART_Packet_t tx_packet;
 
