@@ -12,20 +12,30 @@
 
 
 // Khung truyen du lieu
-#define FRAME_SYNC1 0xAA
-#define FRAME_SYNC2 0x55
-#define FRAME_TAIL  0x0D
+#define FRAME_HEADER_H 0x55
+#define FRAME_HEADER_L 0xAA
 #define MAX_PAYLOAD_SIZE 512
 
+// Cac Packet ID
+#define PID_CMD   0x01
+#define PID_DATA  0x02
+#define PID_ACK   0x07
+#define PID_END   0x08
+
 typedef enum {
-    STATE_WAIT_SYNC1 = 0,
-    STATE_WAIT_SYNC2,
-    STATE_WAIT_CMD,
-    STATE_WAIT_LEN_L,
+    STATE_WAIT_HEADER_H = 0,
+    STATE_WAIT_HEADER_L,
+    STATE_WAIT_PID,
+	STATE_WAIT_ADDR_0,
+	STATE_WAIT_ADDR_1,
+	STATE_WAIT_ADDR_2,
+	STATE_WAIT_ADDR_3,
     STATE_WAIT_LEN_H,
+    STATE_WAIT_LEN_L,
+	STATE_WAIT_CMD,
     STATE_WAIT_PAYLOAD,
-    STATE_WAIT_CHECKSUM,
-    STATE_WAIT_TAIL
+    STATE_WAIT_CS_H,
+    STATE_WAIT_CS_L
 } ParserState_t;
 
 
@@ -65,6 +75,7 @@ typedef enum {
 #pragma pack(push, 1)
 
 typedef struct {
+	uint8_t	 packet_id;
     uint8_t  cmd;
     uint16_t length;
     uint8_t  payload[MAX_PAYLOAD_SIZE];
@@ -106,7 +117,7 @@ typedef struct {
 
 void App_Comm_Init(void);
 void App_Comm_ParseByte(uint8_t byte);
-void App_Comm_SendFrame(CommandID_t cmd, uint8_t *payload, uint16_t len);
+void App_Comm_SendFrame(uint8_t packet_id, CommandID_t cmd, uint8_t *payload, uint16_t len);
 
 void Task_Comm_Handler(void *pvParameters);
 

@@ -11,10 +11,15 @@
 #include <stdio.h>
 #include <string.h>
 
-// Semaphore cho bien trang thai
+// Semaphore cho bien trang thai (UI)
 UI_Transfer_Live_t g_live_status = {0};
 SemaphoreHandle_t xMutex_UI_Live = NULL;
 
+/* Task duy nhat giao tiep voi the nho
+ * Lay cac goi tin tu queue
+ * Truy cap bo nho
+ * Xuat ra queue phu hop
+ */
 void Task_Storage_Handler(void *pvParameters) {
     FATFS fs;
     UART_Packet_t rx_packet;
@@ -41,58 +46,84 @@ void Task_Storage_Handler(void *pvParameters) {
     		// reset packet
     		memset(&tx_packet, 0, sizeof(UART_Packet_t));
 
-    		switch (rx_packet.cmd) {
-				case CMD_SYS_PING_REQ:
-					// TEST 1: PC ping STM32 -> STM32 Pong
-					tx_packet.cmd = CMD_SYS_PING_ACK;
-					tx_packet.length = 4;
-					memcpy(tx_packet.payload, "PONG", 4);
+    		if (rx_packet.packet_id == PID_CMD){
+    			tx_packet.packet_id = PID_ACK; // cmd cần ack
 
-					xQueueSend(qStorageToUart, &tx_packet, 0);
-					break;
-				case CMD_GET_SYS_INFO_REQ:
-					// TEST 2: PC xin info -> tra string de test
-					tx_packet.cmd = CMD_GET_SYS_INFO_ACK;
-					char info_msg[] = "SD OK, 32GB Free";
-					tx_packet.length = strlen(info_msg);
-					memcpy(tx_packet.payload, info_msg, tx_packet.length);
+    			switch (rx_packet.cmd) {
+    				case CMD_SYS_PING_REQ:
+    					// TEST 1: PC ping STM32 -> STM32 Pong
+    					tx_packet.cmd = CMD_SYS_PING_ACK;
+    					tx_packet.length = 4;
+    					memcpy(tx_packet.payload, "PONG", 4);
 
-					xQueueSend(qStorageToUart, &tx_packet, 0);
-					break;
-				case CMD_DIR_READ_REQ:
-				case CMD_FILE_READ_REQ:
-				case CMD_GET_VOL_INFO_REQ:
-				case CMD_DIR_OPEN_REQ:
-				case CMD_FILE_DELETE_REQ:
-				case CMD_DIR_CREATE_REQ:
-				case CMD_FILE_WRITE_START_REQ:
-				case CMD_FILE_WRITE_DATA_REQ:
-				case CMD_FILE_WRITE_END_REQ:
-				case CMD_GET_UI_STATUS_REQ:
-					break;
+    					xQueueSend(qStorageToUart, &tx_packet, 0);
+    					break;
 
-				case CMD_SYS_PING_ACK:
-				case CMD_GET_SYS_INFO_ACK:
-				case CMD_DATA_CHUNK_ACK:
-				case CMD_ERROR_ACK:
-				case CMD_BENCHMARK_DATA:
-				case CMD_GET_VOL_INFO_ACK:
-				case CMD_DIR_ENTRY_ACK:
-				case CMD_DIR_END_ACK:
-				case CMD_FILE_READ_START_ACK:
-				case CMD_FILE_READ_END_ACK:
-				case CMD_GENERIC_ACK:
-				case CMD_GET_UI_STATUS_ACK:
-					break;
-				default:
-					// Lenh khong ton tai, tra ma loi
-					tx_packet.cmd = CMD_ERROR_ACK;
-					tx_packet.length = 1;
-					tx_packet.payload[0] = 0xEE;
+    				case CMD_GET_VOL_INFO_REQ:
+    					// [TODO]: Cung cap thong tin tong dung luong, dung luong trong cua the SD
+    					break;
 
-					xQueueSend(qStorageToUart, &tx_packet, 0);
-					break;
-			}
+    				case CMD_DIR_OPEN_REQ:
+						// [TODO]: Mo thu muc theo duong dan, dung vong lap f_readdir tra ve CMD_DIR_ENTRY_ACK
+						break;
+
+    				case CMD_FILE_DELETE_REQ:
+						// [TODO]: Xoa file hoac thu muc rong bang f_unlink
+						break;
+
+    				case CMD_DIR_CREATE_REQ:
+						// [TODO]: Tao thu muc moi bang f_mkdir
+						break;
+
+
+					// DOWNLOAD & UPLOAD
+					// DOWNLOAD (SD -> PC)
+					case CMD_FILE_READ_REQ:
+						// [TODO]: Mo file (f_open read), lay size, ban CMD_FILE_READ_START_ACK, sau do loop f_read ban CMD_DATA_CHUNK_ACK
+						break;
+
+					// UPLOAD (PC -> SD)
+					case CMD_FILE_WRITE_START_REQ:
+						// [TODO]: Mo file (f_open write create always), tra CMD_GENERIC_ACK(0)
+						break;
+
+					case CMD_FILE_WRITE_DATA_REQ:
+						// [TODO]: Ghi payload vao file (f_write), tra CMD_GENERIC_ACK(0) de bao PC gui tiep
+						break;
+
+					case CMD_FILE_WRITE_END_REQ:
+						// [TODO]: Dong file (f_close), tra CMD_GENERIC_ACK
+						break;
+
+					// UI STATUS API
+					case CMD_GET_UI_STATUS_REQ:
+						// [TODO]: Lay Mutex, copy g_live_status vao payload va gui CMD_GET_UI_STATUS_ACK
+						break;
+
+					// CÁC LỆNH TEST KHÁC
+					case CMD_GET_SYS_INFO_REQ:
+						tx_packet.cmd = CMD_GET_SYS_INFO_ACK;
+						char info_msg[] = "SD OK, Ready for API";
+						tx_packet.length = strlen(info_msg);
+						memcpy(tx_packet.payload, info_msg, tx_packet.length);
+						xQueueSend(qStorageToUart, &tx_packet, 0);
+						break;
+
+					default:
+						// Lenh khong ton tai hoac khong ho tro
+						tx_packet.cmd = CMD_ERROR_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = 0xEE; // Ma loi tuy chon (VD: Unknown Command)
+						xQueueSend(qStorageToUart, &tx_packet, 0);
+						break;
+    			}
+    		}
+    		// Xu li khi nhan data tu PC
+    		else if (rx_packet.packet_id == PID_DATA){
+    			// [TODO]: Kien truc Handshaking hien tai dung chung PID_CMD cho CMD_FILE_WRITE_DATA_REQ
+				// Nen nhom nay co the bo qua hoac dung cho viec truyen streaming toc do cao khong can ACK.
+    		}
+
 
     	}
     }
