@@ -25,13 +25,15 @@ void Task_Storage_Handler(void *pvParameters) {
     UART_Packet_t rx_packet;
 	UART_Packet_t tx_packet;
 	FRESULT fr;
+	FIL current_file;
 
 	// Khoi tao mutex
 	xMutex_UI_Live = xSemaphoreCreateMutex();
 
     // Mount sd
     HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
-    if (f_mount(&fs, "", 1) != FR_OK) {
+    fr = f_mount(&fs, "", 1);
+    if (fr != FR_OK) {
         // Loi: Bat LED G14
         HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_SET);
         g_live_status.is_mounted = 0;
@@ -60,7 +62,42 @@ void Task_Storage_Handler(void *pvParameters) {
     					break;
 
     				case CMD_GET_VOL_INFO_REQ:
-    					// [TODO]: Cung cap thong tin tong dung luong, dung luong trong cua the SD
+    					// Cung cap thong tin cua the SD
+    					DWORD fre_clust, fre_sect, total_sect;
+    					FATFS *pfs;
+    					Payload_VolInfo_t vol_info = {0};
+
+    					fr = f_getfree("", &fre_clust, &pfs);
+    					vol_info.status = fr;
+
+    					if (fr == FR_OK){
+    						vol_info.sector_size = 512;
+    						// Tong sector va sector trong
+    						// Doi sang KB
+    						total_sect = (pfs->n_fatent -2) * pfs->csize;
+    						fre_sect = fre_clust * pfs->csize;
+
+    						// Vi mot sector = 512 nen /2 la xong
+    						// [TODO]: ranh thi fix nhe
+    						vol_info.total_kb = total_sect / 2;
+							vol_info.free_kb =  fre_sect / 2;
+
+							// Thong so FAT
+							f_getlabel("", vol_info.label, 0);
+							vol_info.fs_type = pfs->fs_type;
+							vol_info.cluster_size = pfs->csize;
+							vol_info.free_clusters = fre_clust;
+							vol_info.last_alloc_cluster = pfs->last_clst; //Truong hop phan manh
+    					}
+
+    					vol_info.uptime_ms = xTaskGetTickCount();
+
+    					// Dong goi
+						tx_packet.cmd = CMD_GET_VOL_INFO_ACK;
+						tx_packet.length = sizeof(Payload_VolInfo_t);
+						memcpy(tx_packet.payload, &vol_info, tx_packet.length);
+
+						xQueueSend(qStorageToUart, &tx_packet, 0);
     					break;
 
     				case CMD_DIR_OPEN_REQ:

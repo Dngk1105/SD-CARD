@@ -82,10 +82,21 @@ typedef struct {
 } UART_Packet_t;
 
 typedef struct {
-    uint8_t  status;       // 0: OK, >0: FatFs Error
-    uint32_t total_kb;
-    uint32_t free_kb;
-    char     label[12];
+    uint8_t  status;            // Trang thai tra ve (FR_OK neu thanh cong)
+
+    uint32_t total_kb;          // Tong dung luong the SD (KB)
+    uint32_t free_kb;           // Dung luong con trong (KB)
+
+    char     label[12];         // Ten volume (VD: "DATA", "SDCARD")
+
+    uint8_t  fs_type;           // Loai FAT (12/16/32/exFAT)
+    uint16_t sector_size;       // Kich thuoc sector (byte)
+    uint16_t cluster_size;      // So sector moi cluster
+
+    uint32_t free_clusters;     // So cluster trong hien tai
+    uint32_t last_alloc_cluster;// Cluster cap phat gan nhat
+
+    uint32_t uptime_ms;         // Thoi gian he thong da chay (ms)
 } Payload_VolInfo_t;
 
 typedef struct {

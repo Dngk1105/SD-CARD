@@ -491,8 +491,8 @@ inline DRESULT USER_SPI_read (
 
 
 /*-----------------------------------------------------------------------*/
-/* Write sector(s)
- * Can kiem tra CardType de convert LBA->BA
+//* Write sector(s)
+// * Can kiem tra CardType de convert LBA->BA
 /*-----------------------------------------------------------------------*/
 
 #if _USE_WRITE
