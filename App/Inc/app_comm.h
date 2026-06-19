@@ -104,7 +104,8 @@ typedef struct {
     uint16_t fdate;
     uint16_t ftime;
     uint8_t  fattrib;
-    char     fname[32];
+    char     fname[128];
+    char	 altname[14];
 } Payload_FileInfo_t;
 
 typedef struct {

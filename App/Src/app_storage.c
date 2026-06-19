@@ -101,7 +101,43 @@ void Task_Storage_Handler(void *pvParameters) {
     					break;
 
     				case CMD_DIR_OPEN_REQ:
-						// [TODO]: Mo thu muc theo duong dan, dung vong lap f_readdir tra ve CMD_DIR_ENTRY_ACK
+						// Mo thu muc theo duong dan, dung vong lap f_readdir tra ve CMD_DIR_ENTRY_ACK
+    					DIR dir;
+    					FILINFO file_info;
+    					Payload_FileInfo_t item_info;
+
+    					// Mo thu muc
+    					char *path = (char*) rx_packet.payload;
+    					fr = f_opendir(&dir, path);
+    					if (fr == FR_OK){
+    						while (1){
+    							fr = f_readdir(&dir, &file_info); // doc entries theo thu tu
+    							// record cuoi co ky tu dau la 0;
+    							if (fr != FR_OK || file_info.fname[0] == 0) break;
+
+    							memset(&item_info, 0, sizeof(Payload_FileInfo_t));
+    							item_info.fsize = file_info.fsize;
+								item_info.fdate = file_info.fdate;
+								item_info.ftime = file_info.ftime;
+								item_info.fattrib = file_info.fattrib;
+								strncpy(item_info.fname, file_info.fname, sizeof(item_info.fname) - 1);
+								strncpy(item_info.altname, file_info.altname, sizeof(item_info.altname) - 1);
+
+								tx_packet.cmd = CMD_DIR_ENTRY_ACK;
+								tx_packet.length = sizeof(Payload_FileInfo_t);
+								memcpy(tx_packet.payload, &item_info, tx_packet.length);
+
+								//portMAX_DELAY: Cho entries truoc gui xong
+								xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+    						}
+    						f_closedir(&dir);
+    					}
+
+    					tx_packet.cmd = CMD_DIR_END_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = (uint8_t)fr; // kem ma loi
+
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
 
     				case CMD_FILE_DELETE_REQ:
