@@ -26,6 +26,7 @@ void Task_Storage_Handler(void *pvParameters) {
 	UART_Packet_t tx_packet;
 	FRESULT fr;
 	FIL current_file;
+	static uint8_t is_downloading = 0;
 
 	// Khoi tao mutex
 	xMutex_UI_Live = xSemaphoreCreateMutex();
@@ -79,8 +80,8 @@ void Task_Storage_Handler(void *pvParameters) {
 
     						// Vi mot sector = 512 nen /2 la xong
     						// [TODO]: ranh thi fix nhe
-    						vol_info.total_kb = total_sect / 2;
-							vol_info.free_kb =  fre_sect / 2;
+    						vol_info.total_kb = total_sect >> 1;
+							vol_info.free_kb =  fre_sect >> 1;
 
 							// Thong so FAT
 							f_getlabel("", vol_info.label, 0);
@@ -141,32 +142,126 @@ void Task_Storage_Handler(void *pvParameters) {
 						break;
 
     				case CMD_FILE_DELETE_REQ:
+    				{
 						// [TODO]: Xoa file hoac thu muc rong bang f_unlink
-						break;
+						char *path = (char*) rx_packet.payload;
+						fr = f_unlink(path);
 
-    				case CMD_DIR_CREATE_REQ:
+						// Bắn ACK báo cáo kết quả xóa lên PC
+						tx_packet.cmd = CMD_GENERIC_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = (uint8_t)fr;
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+						break;
+    				}
+					case CMD_DIR_CREATE_REQ:
+					{
 						// [TODO]: Tao thu muc moi bang f_mkdir
-						break;
+						char *path = (char*) rx_packet.payload;
+						fr = f_mkdir(path);
 
+						// ACK
+						tx_packet.cmd = CMD_GENERIC_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = (uint8_t)fr;
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+						break;
+					}
 
 					// DOWNLOAD & UPLOAD
 					// DOWNLOAD (SD -> PC)
 					case CMD_FILE_READ_REQ:
-						// [TODO]: Mo file (f_open read), lay size, ban CMD_FILE_READ_START_ACK, sau do loop f_read ban CMD_DATA_CHUNK_ACK
+					{
+						// Mo file (f_open read)
+						char *path = (char*) rx_packet.payload;
+						fr = f_open(&current_file, path, FA_READ);
+
+						// Dong goi start ACK kem size file
+						Payload_FileStart_t start_info;
+						start_info.status = (uint8_t)fr;
+						start_info.file_size = (fr == FR_OK) ? f_size(&current_file) : 0;
+
+						tx_packet.cmd = CMD_FILE_READ_START_ACK;
+						tx_packet.length = sizeof(Payload_FileStart_t);
+						memcpy(tx_packet.payload, &start_info, tx_packet.length);
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+
+						// Loop f_read ban CMD_DATA_CHUNK_ACK
+						if (fr == FR_OK) {
+							is_downloading = 1;
+						}
 						break;
+					}
+
+					case CMD_FILE_READ_NEXT_REQ:
+					{
+						if (is_downloading) {
+							UINT bytes_read;
+							fr = f_read(&current_file, tx_packet.payload, MAX_PAYLOAD_SIZE, &bytes_read);
+
+							// Doc thanh cong va van con data
+							if (fr == FR_OK && bytes_read > 0) {
+								tx_packet.cmd = CMD_DATA_CHUNK_ACK;
+								tx_packet.length = bytes_read;
+								xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+							}
+							// Cuoi file hoac co loi
+							else {
+								f_close(&current_file);
+								is_downloading = 0;
+
+								// END ACK
+								tx_packet.cmd = CMD_FILE_READ_END_ACK;
+								tx_packet.length = 1;
+								tx_packet.payload[0] = (uint8_t)fr;
+								xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+							}
+						}
+						break;
+					}
 
 					// UPLOAD (PC -> SD)
 					case CMD_FILE_WRITE_START_REQ:
-						// [TODO]: Mo file (f_open write create always), tra CMD_GENERIC_ACK(0)
+					{
+						// Mo file (f_open write create always)
+						char *path = (char*) rx_packet.payload;
+						fr = f_open(&current_file, path, FA_CREATE_ALWAYS | FA_WRITE);
+
+						// Tra CMD_GENERIC_ACK(0)
+						tx_packet.cmd = CMD_GENERIC_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = (uint8_t)fr;
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
+					}
 
 					case CMD_FILE_WRITE_DATA_REQ:
-						// [TODO]: Ghi payload vao file (f_write), tra CMD_GENERIC_ACK(0) de bao PC gui tiep
+					{
+						// Ghi payload vao file (f_write)
+						UINT bytes_written;
+						fr = f_write(&current_file, rx_packet.payload, rx_packet.length, &bytes_written);
+
+						// Tra CMD_GENERIC_ACK(0) de bao PC gui tiep
+						tx_packet.cmd = CMD_GENERIC_ACK;
+						tx_packet.length = 1;
+						// Check luon xem so byte ghi thuc te co khop voi payload length khong
+						tx_packet.payload[0] = (fr == FR_OK && bytes_written == rx_packet.length) ? 0x00 : 0xFF;
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
+					}
 
 					case CMD_FILE_WRITE_END_REQ:
-						// [TODO]: Dong file (f_close), tra CMD_GENERIC_ACK
+					{
+						// Dong file (f_close)
+						fr = f_close(&current_file);
+
+						// Tra CMD_GENERIC_ACK
+						tx_packet.cmd = CMD_GENERIC_ACK;
+						tx_packet.length = 1;
+						tx_packet.payload[0] = (uint8_t)fr;
+						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
+					}
 
 					// UI STATUS API
 					case CMD_GET_UI_STATUS_REQ:

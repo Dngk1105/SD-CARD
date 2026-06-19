@@ -46,6 +46,7 @@ typedef enum {
 	CMD_GET_SYS_INFO_REQ    = 0x01,
 	CMD_DIR_READ_REQ        = 0x02,
 	CMD_FILE_READ_REQ       = 0x03,
+	CMD_FILE_READ_NEXT_REQ  = 0x04,
 	CMD_GET_VOL_INFO_REQ    = 0x10,
 	CMD_DIR_OPEN_REQ        = 0x11,
 	CMD_FILE_DELETE_REQ     = 0x12,
