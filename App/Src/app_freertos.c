@@ -27,13 +27,13 @@ SemaphoreHandle_t semUartTx;
 
 void App_FreeRTOS_Init(void) {
 	// Khoi tao queue
-	qUartToStorage = xQueueCreate(5, sizeof(UART_Packet_t));	// Chua toi da 5 lenh gui tu PC
-	qStorageToUart = xQueueCreate(8, sizeof(UART_Packet_t));	// Chua 8 block data gui tu sd
+	qUartToStorage = xQueueCreate(2, sizeof(UART_Packet_t));	// Chua toi da 2 lenh gui tu PC
+	qStorageToUart = xQueueCreate(2, sizeof(UART_Packet_t));	// Chua 2 block data gui tu sd
 
 
 
-    xTaskCreate(Task_Storage_Handler, "Storage", 1024, NULL, 3, &hStorageTask);
-    xTaskCreate(Task_Comm_Handler, "Comm", 512, NULL, 2, &hCommTask);
+    xTaskCreate(Task_Storage_Handler, "Storage", 2048 , NULL, 3, &hStorageTask);
+    xTaskCreate(Task_Comm_Handler, "Comm", 1024, NULL, 2, &hCommTask);
 
     semUartTx = xSemaphoreCreateBinary();
 }

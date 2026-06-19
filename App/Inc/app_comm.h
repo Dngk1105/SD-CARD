@@ -14,7 +14,7 @@
 // Khung truyen du lieu
 #define FRAME_HEADER_H 0x55
 #define FRAME_HEADER_L 0xAA
-#define MAX_PAYLOAD_SIZE 512
+#define MAX_PAYLOAD_SIZE 1024
 
 // Cac Packet ID
 #define PID_CMD   0x01

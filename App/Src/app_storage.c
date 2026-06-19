@@ -22,8 +22,8 @@ SemaphoreHandle_t xMutex_UI_Live = NULL;
  */
 void Task_Storage_Handler(void *pvParameters) {
     FATFS fs;
-    UART_Packet_t rx_packet;
-	UART_Packet_t tx_packet;
+    static UART_Packet_t rx_packet;
+	static UART_Packet_t tx_packet;
 	FRESULT fr;
 	FIL current_file;
 	static uint8_t is_downloading = 0;

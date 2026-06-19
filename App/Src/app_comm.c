@@ -19,8 +19,9 @@
 extern UART_HandleTypeDef huart1;
 
 // Cau hinh buffer DMA
-#define RX_DMA_BUF_SIZE 1024
+#define RX_DMA_BUF_SIZE (MAX_PAYLOAD_SIZE * 2)
 static uint8_t rx_dma_buf[RX_DMA_BUF_SIZE];
+static uint8_t tx_dma_buf[MAX_PAYLOAD_SIZE + 16]; // chua frame hoan chinh
 static uint16_t old_pos = 0;
 
 // Parse du lieu
@@ -138,7 +139,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 
 
 // Xu li transfer len PC
-static uint8_t tx_dma_buf[MAX_PAYLOAD_SIZE + 7]; // chua frame hoan chinh
 void App_Comm_SendFrame(uint8_t packet_id, CommandID_t cmd, uint8_t *payload, uint16_t payload_len) {
     uint16_t checksum = 0;
     uint16_t frame_idx = 0;
