@@ -100,12 +100,12 @@ typedef struct {
 } Payload_VolInfo_t;
 
 typedef struct {
-    uint32_t fsize;
-    uint16_t fdate;
-    uint16_t ftime;
-    uint8_t  fattrib;
-    char     fname[128];
-    char	 altname[14];
+    uint32_t fsize;      // Kích thước file (byte)
+    uint16_t fdate;      // Ngày tạo/sửa (định dạng FAT)
+    uint16_t ftime;      // Giờ tạo/sửa (định dạng FAT)
+    uint8_t  fattrib;    // Thuộc tính file (read-only, hidden, dir,...)
+    char     fname[128]; // Tên file đầy đủ (long file name)
+    char     altname[14];// Tên file ngắn 8.3 (alternative name)
 } Payload_FileInfo_t;
 
 typedef struct {
