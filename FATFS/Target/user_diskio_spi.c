@@ -198,6 +198,14 @@ void xmit_spi_multi (
 }
 #endif
 
+/* Reset SPI bus khi the bi treo giua chung.
+ * Gui 80 clock voi CS HIGH de buoc the thoat khoi trang thai loi. */
+static void spi_bus_recovery(void)
+{
+    CS_HIGH();
+    for (uint8_t i = 0; i < 10; i++)   /* 10 byte = 80 clock */
+        xchg_spi(0xFF);
+}
 
 /*-----------------------------------------------------------------------*/
 /* Wait for card ready                                                   */
@@ -251,7 +259,7 @@ int spiselect (void)	/* 1:OK, 0:Timeout */
 {
 	CS_LOW();		/* Set CS# low */
 	xchg_spi(0xFF);	/* Dummy clock (force DO enabled) */
-	if (wait_ready(500)) return 1;	/* Wait for card ready */
+	if (wait_ready(2000)) return 1;	/* Wait for card ready */
 
 	despiselect();
 	return 0;	/* Timeout */
@@ -302,8 +310,7 @@ int xmit_datablock (	/* 1:OK, 0:Failed */
 {
 	BYTE resp;
 
-
-	if (!wait_ready(500)) return 0;		/* Wait for card ready */
+	if (!wait_ready(2000)) return 0;		/* Wait for card ready */
 
 	xchg_spi(token);					/* Send token */
 	if (token != 0xFD) {				/* Send data if token is other than StopTran */
@@ -312,7 +319,7 @@ int xmit_datablock (	/* 1:OK, 0:Failed */
 
 		resp = xchg_spi(0xFF);				/* Receive data resp */
 		if ((resp & 0x1F) != 0x05) return 0;	/* Function fails if the data packet was not accepted */
-		if (!wait_ready(500)) return 0;
+		if (!wait_ready(2000)) return 0;
 	}
 	return 1;
 }
@@ -511,9 +518,16 @@ inline DRESULT USER_SPI_write (
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA ==> BA conversion (byte addressing cards) */
 
 	if (count == 1) {	/* Single sector write */
-		if ((send_cmd(CMD24, sector) == 0)	/* WRITE_BLOCK */
-			&& xmit_datablock(buff, 0xFE)) {
-			count = 0;
+		UINT retry = 3;
+		while (retry--){
+			if ((send_cmd(CMD24, sector) == 0)	/* WRITE_BLOCK */
+				&& xmit_datablock(buff, 0xFE)) {
+				count = 0;
+				break;
+			}
+			//That bai despiselect  de reset bus
+	        spi_bus_recovery();
+	        vTaskDelay(pdMS_TO_TICKS(50));
 		}
 	}
 	else {				/* Multiple sector write */
