@@ -29,7 +29,7 @@ void Storage_Get_Live_Status(UI_Transfer_Live_t *out_status) {
     if (out_status == NULL) return;
 
     // Lay mutex
-    if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(10)) == pdTRUE) {
+    if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(1)) == pdTRUE) {
         memcpy(out_status, &g_live_status, sizeof(UI_Transfer_Live_t));
         xSemaphoreGive(xMutex_UI_Live);
     }
@@ -419,28 +419,6 @@ void Task_Storage_Handler(void *pvParameters) {
 						break;
 					}
 
-					// UI STATUS API
-					case CMD_GET_UI_STATUS_REQ:
-						// [TODO]: Lay Mutex, copy g_live_status vao payload va gui CMD_GET_UI_STATUS_ACK
-                        UI_Transfer_Live_t status_snapshot;
-
-                        if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(100)) == pdTRUE) {
-                            memcpy(&status_snapshot, &g_live_status, sizeof(UI_Transfer_Live_t));
-                            xSemaphoreGive(xMutex_UI_Live);
-
-                            tx_packet.cmd    = CMD_GET_UI_STATUS_ACK;
-                            tx_packet.length = sizeof(UI_Transfer_Live_t);
-                            memcpy(tx_packet.payload, &status_snapshot, tx_packet.length);
-                        } else {
-                            // Timeout lay mutex -> bao loi
-                            tx_packet.cmd        = CMD_ERROR_ACK;
-                            tx_packet.length     = 1;
-                            tx_packet.payload[0] = 0xFE; // Ma loi: mutex timeout
-                        }
-
-                        xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
-						break;
-
 					// CÁC LỆNH TEST KHÁC
 					case CMD_GET_SYS_INFO_REQ:
 						tx_packet.cmd = CMD_GET_SYS_INFO_ACK;
@@ -468,4 +446,30 @@ void Task_Storage_Handler(void *pvParameters) {
 
     	}
     }
+}
+
+
+/* Task danh rieng cho viec xuat UI
+ * tranh truong hop sd dang ban
+ */
+void Task_UIReq_Handler(void *pvParameters){
+	UART_Packet_t rx_packet, tx_packet;
+	UI_Transfer_Live_t ui_data;
+	while (1){
+		if (xQueueReceive(qUIReq, &rx_packet, portMAX_DELAY)){
+			memset(&tx_packet, 0, sizeof(UART_Packet_t));
+			tx_packet.packet_id = PID_ACK;
+
+			if (rx_packet.cmd == CMD_GET_UI_STATUS_REQ){
+				Storage_Get_Live_Status(&ui_data);
+
+				// goi packet
+				tx_packet.cmd = CMD_GET_UI_STATUS_ACK;
+				tx_packet.length = sizeof(UI_Transfer_Live_t);
+				memcpy(tx_packet.payload, &ui_data, tx_packet.length);
+
+				xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+			}
+		}
+	}
 }

@@ -16,6 +16,7 @@
 // Khai bao cac Handler
 extern QueueHandle_t qUartToStorage;
 extern QueueHandle_t qStorageToUart;
+extern QueueHandle_t qUIReq;
 extern SemaphoreHandle_t semUartTx;
 
 void App_FreeRTOS_Init(void);

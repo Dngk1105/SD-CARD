@@ -95,8 +95,11 @@ void App_Comm_ParseByte(uint8_t byte){
 			rcv_checksum |= byte;
 			if (rcv_checksum == calc_checksum){
 				// Hop le day vao queue cho Storage_Task
+				// Neu can cap nhat UI thi day vao qUIReq
 				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-				xQueueSendFromISR(qUartToStorage, &rx_packet, &xHigherPriorityTaskWoken);
+				if (rx_packet.cmd == CMD_GET_UI_STATUS_REQ){
+					xQueueSendFromISR(qUIReq, &rx_packet, &xHigherPriorityTaskWoken);
+				} else xQueueSendFromISR(qUartToStorage, &rx_packet, &xHigherPriorityTaskWoken);
 				portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 			}
 
