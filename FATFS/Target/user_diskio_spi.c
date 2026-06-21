@@ -312,6 +312,7 @@ int xmit_datablock (	/* 1:OK, 0:Failed */
 
 		resp = xchg_spi(0xFF);				/* Receive data resp */
 		if ((resp & 0x1F) != 0x05) return 0;	/* Function fails if the data packet was not accepted */
+		if (!wait_ready(500)) return 0;
 	}
 	return 1;
 }
@@ -555,7 +556,10 @@ inline DRESULT USER_SPI_ioctl (
 
 	switch (cmd) {
 	case CTRL_SYNC :		/* Wait for end of internal write process of the drive */
-		if (spiselect()) res = RES_OK;
+		if (spiselect()){
+			res = RES_OK;
+			despiselect();
+		}
 		break;
 
 	case GET_SECTOR_COUNT :	/* Get drive capacity in unit of sector (DWORD) */

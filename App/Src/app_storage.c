@@ -15,6 +15,16 @@
 UI_Transfer_Live_t g_live_status = {0};
 SemaphoreHandle_t xMutex_UI_Live = NULL;
 
+// cap nhat g_live_status an toan qua mutex
+// chi ghi nhung truong can thiet, khong ghi toan bo struct
+static void LiveStatus_Update(UI_Transfer_Live_t *patch){
+	if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(100)) == pdTRUE){
+		memcpy(&g_live_status, patch, sizeof(UI_Transfer_Live_t));
+		xSemaphoreGive(xMutex_UI_Live);
+	}
+}
+
+
 /* Task duy nhat giao tiep voi the nho
  * Lay cac goi tin tu queue
  * Truy cap bo nho
@@ -32,7 +42,7 @@ void Task_Storage_Handler(void *pvParameters) {
 	xMutex_UI_Live = xSemaphoreCreateMutex();
 
     // Mount sd
-	vTaskDelay(pdMS_TO_TICKS(500));
+	vTaskDelay(pdMS_TO_TICKS(1000));
     HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
     fr = f_mount(&fs, "", 1);
     if (fr != FR_OK) {
@@ -144,9 +154,33 @@ void Task_Storage_Handler(void *pvParameters) {
 
     				case CMD_FILE_DELETE_REQ:
     				{
-						// [TODO]: Xoa file hoac thu muc rong bang f_unlink
+						// Xoa file hoac thu muc rong bang f_unlink
 						char *path = (char*) rx_packet.payload;
+
+						// Cap nhat live status
+						{
+							UI_Transfer_Live_t patch = g_live_status;
+							patch.operation_type  = OP_DELETE;
+							patch.transfer_status = 0; // Running
+							patch.last_error_code = 0;
+							strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
+							patch.total_bytes     = 0;
+							patch.bytes_processed = 0;
+							patch.progress_percent= 0;
+							patch.speed_kbps      = 0.0f;
+							LiveStatus_Update(&patch);
+						}
+
 						fr = f_unlink(path);
+
+						// Cap nhat live status: Ket qua xoa
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.transfer_status = (fr == FR_OK) ? 3 : 2; // Done / Error
+                            patch.last_error_code = (uint8_t) fr;
+                            patch.operation_type  = OP_IDLE;
+                            LiveStatus_Update(&patch);
+                        }
 
 						// Bắn ACK báo cáo kết quả xóa lên PC
 						tx_packet.cmd = CMD_GENERIC_ACK;
@@ -157,9 +191,29 @@ void Task_Storage_Handler(void *pvParameters) {
     				}
 					case CMD_DIR_CREATE_REQ:
 					{
-						// [TODO]: Tao thu muc moi bang f_mkdir
+						// Tao thu muc moi bang f_mkdir
 						char *path = (char*) rx_packet.payload;
+
+                        // Cap nhat live status: bat dau tao thu muc
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.operation_type  = OP_MKDIR;
+                            patch.transfer_status = 0; // Running
+                            patch.last_error_code = 0;
+                            strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
+                            LiveStatus_Update(&patch);
+                        }
+
 						fr = f_mkdir(path);
+
+                        // Cap nhat live status: ket qua tao thu muc
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.transfer_status = (fr == FR_OK) ? 3 : 2; // Done / Error
+                            patch.last_error_code = (uint8_t) fr;
+                            patch.operation_type  = OP_IDLE;
+                            LiveStatus_Update(&patch);
+                        }
 
 						// ACK
 						tx_packet.cmd = CMD_GENERIC_ACK;
@@ -176,6 +230,20 @@ void Task_Storage_Handler(void *pvParameters) {
 						// Mo file (f_open read)
 						char *path = (char*) rx_packet.payload;
 						fr = f_open(&current_file, path, FA_READ);
+
+                        // Cap nhat live status: bat dau download
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.operation_type   = OP_DOWNLOAD;
+                            patch.transfer_status  = (fr == FR_OK) ? 0 : 2; // Running / Error
+                            patch.last_error_code  = (uint8_t) fr;
+                            patch.total_bytes      = (fr == FR_OK) ? f_size(&current_file) : 0;
+                            patch.bytes_processed  = 0;
+                            patch.progress_percent = 0;
+                            patch.speed_kbps       = 0.0f;
+                            strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
+                            LiveStatus_Update(&patch);
+                        }
 
 						// Dong goi start ACK kem size file
 						Payload_FileStart_t start_info;
@@ -198,6 +266,7 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						if (is_downloading) {
 							UINT bytes_read;
+                            TickType_t t_start = xTaskGetTickCount();
 							fr = f_read(&current_file, tx_packet.payload, MAX_PAYLOAD_SIZE, &bytes_read);
 
 							// Doc thanh cong va van con data
@@ -205,11 +274,42 @@ void Task_Storage_Handler(void *pvParameters) {
 								tx_packet.cmd = CMD_DATA_CHUNK_ACK;
 								tx_packet.length = bytes_read;
 								xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+
+                                // Cap nhat tien do download
+                                {
+                                    UI_Transfer_Live_t patch = g_live_status;
+                                    patch.bytes_processed += bytes_read;
+
+                                    if (patch.total_bytes > 0) {
+                                        patch.progress_percent = (uint8_t)(
+                                            (patch.bytes_processed * 100UL) / patch.total_bytes
+                                        );
+                                    }
+
+                                    // Tinh toc do: KB/s
+                                    uint32_t elapsed_ms = (xTaskGetTickCount() - t_start) * portTICK_PERIOD_MS;
+                                    if (elapsed_ms > 0) {
+                                        patch.speed_kbps = ((float) bytes_read / 1024.0f)
+                                                           / (elapsed_ms / 1000.0f);
+                                    }
+                                    LiveStatus_Update(&patch);
+                                }
 							}
 							// Cuoi file hoac co loi
 							else {
 								f_close(&current_file);
 								is_downloading = 0;
+
+                                // Cap nhat live status: ket thuc download
+                                {
+                                    UI_Transfer_Live_t patch = g_live_status;
+                                    patch.transfer_status  = (fr == FR_OK) ? 3 : 2; // Done / Error
+                                    patch.last_error_code  = (uint8_t) fr;
+                                    patch.progress_percent = (fr == FR_OK) ? 100 : patch.progress_percent;
+                                    patch.operation_type   = OP_IDLE;
+                                    patch.speed_kbps       = 0.0f;
+                                    LiveStatus_Update(&patch);
+                                }
 
 								// END ACK
 								tx_packet.cmd = CMD_FILE_READ_END_ACK;
@@ -228,6 +328,20 @@ void Task_Storage_Handler(void *pvParameters) {
 						char *path = (char*) rx_packet.payload;
 						fr = f_open(&current_file, path, FA_CREATE_ALWAYS | FA_WRITE);
 
+                        // Cap nhat live status: bat dau upload
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.operation_type   = OP_UPLOAD;
+                            patch.transfer_status  = (fr == FR_OK) ? 0 : 2; // Running / Error
+                            patch.last_error_code  = (uint8_t) fr;
+                            patch.bytes_processed  = 0;
+                            patch.total_bytes      = 0; // Chua biet truoc, PC se gui tung chunk
+                            patch.progress_percent = 0;
+                            patch.speed_kbps       = 0.0f;
+                            strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
+                            LiveStatus_Update(&patch);
+                        }
+
 						// Tra CMD_GENERIC_ACK(0)
 						tx_packet.cmd = CMD_GENERIC_ACK;
 						tx_packet.length = 1;
@@ -240,13 +354,31 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Ghi payload vao file (f_write)
 						UINT bytes_written;
+                        TickType_t t_start = xTaskGetTickCount();
 						fr = f_write(&current_file, rx_packet.payload, rx_packet.length, &bytes_written);
+						uint8_t write_ok = (fr == FR_OK && bytes_written == rx_packet.length);
+
+                        // Cap nhat tien do upload
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.bytes_processed += bytes_written;
+                            patch.last_error_code  = (uint8_t) fr;
+                            patch.transfer_status  = write_ok ? 0 : 2; // Running / Error
+
+                            // Tinh toc do: KB/s
+                            uint32_t elapsed_ms = (xTaskGetTickCount() - t_start) * portTICK_PERIOD_MS;
+                            if (elapsed_ms > 0) {
+                                patch.speed_kbps = ((float) bytes_written / 1024.0f)
+                                                   / (elapsed_ms / 1000.0f);
+                            }
+                            LiveStatus_Update(&patch);
+                        }
 
 						// Tra CMD_GENERIC_ACK(0) de bao PC gui tiep
 						tx_packet.cmd = CMD_GENERIC_ACK;
 						tx_packet.length = 1;
 						// Check luon xem so byte ghi thuc te co khop voi payload length khong
-						tx_packet.payload[0] = (fr == FR_OK && bytes_written == rx_packet.length) ? 0x00 : 0xFF;
+						tx_packet.payload[0] = write_ok ? 0x00 : 0xFF;
 						xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
 					}
@@ -255,6 +387,17 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Dong file (f_close)
 						fr = f_close(&current_file);
+
+                        // Cap nhat live status: ket thuc upload
+                        {
+                            UI_Transfer_Live_t patch = g_live_status;
+                            patch.transfer_status  = (fr == FR_OK) ? 3 : 2; // Done / Error
+                            patch.last_error_code  = (uint8_t) fr;
+                            patch.progress_percent = (fr == FR_OK) ? 100 : patch.progress_percent;
+                            patch.operation_type   = OP_IDLE;
+                            patch.speed_kbps       = 0.0f;
+                            LiveStatus_Update(&patch);
+                        }
 
 						// Tra CMD_GENERIC_ACK
 						tx_packet.cmd = CMD_GENERIC_ACK;
@@ -267,6 +410,23 @@ void Task_Storage_Handler(void *pvParameters) {
 					// UI STATUS API
 					case CMD_GET_UI_STATUS_REQ:
 						// [TODO]: Lay Mutex, copy g_live_status vao payload va gui CMD_GET_UI_STATUS_ACK
+                        UI_Transfer_Live_t status_snapshot;
+
+                        if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(100)) == pdTRUE) {
+                            memcpy(&status_snapshot, &g_live_status, sizeof(UI_Transfer_Live_t));
+                            xSemaphoreGive(xMutex_UI_Live);
+
+                            tx_packet.cmd    = CMD_GET_UI_STATUS_ACK;
+                            tx_packet.length = sizeof(UI_Transfer_Live_t);
+                            memcpy(tx_packet.payload, &status_snapshot, tx_packet.length);
+                        } else {
+                            // Timeout lay mutex -> bao loi
+                            tx_packet.cmd        = CMD_ERROR_ACK;
+                            tx_packet.length     = 1;
+                            tx_packet.payload[0] = 0xFE; // Ma loi: mutex timeout
+                        }
+
+                        xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
 						break;
 
 					// CÁC LỆNH TEST KHÁC
@@ -290,7 +450,7 @@ void Task_Storage_Handler(void *pvParameters) {
     		// Xu li khi nhan data tu PC
     		else if (rx_packet.packet_id == PID_DATA){
     			// [TODO]: Kien truc Handshaking hien tai dung chung PID_CMD cho CMD_FILE_WRITE_DATA_REQ
-				// Nen nhom nay co the bo qua hoac dung cho viec truyen streaming toc do cao khong can ACK.
+				// Nen co the bo qua hoac dung cho viec truyen streaming toc do cao khong can ACK.
     		}
 
 
