@@ -19,5 +19,6 @@
 
 
 void Task_Storage_Handler(void *pvParameters);
+void Storage_Get_Live_Status(UI_Transfer_Live_t *out_status);	// Getter lay UI Status
 
 #endif /* INC_APP_STORAGE_H_ */

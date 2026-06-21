@@ -24,6 +24,17 @@ static void LiveStatus_Update(UI_Transfer_Live_t *patch){
 	}
 }
 
+// Getter
+void Storage_Get_Live_Status(UI_Transfer_Live_t *out_status) {
+    if (out_status == NULL) return;
+
+    // Lay mutex
+    if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(10)) == pdTRUE) {
+        memcpy(out_status, &g_live_status, sizeof(UI_Transfer_Live_t));
+        xSemaphoreGive(xMutex_UI_Live);
+    }
+}
+
 
 /* Task duy nhat giao tiep voi the nho
  * Lay cac goi tin tu queue
@@ -37,6 +48,7 @@ void Task_Storage_Handler(void *pvParameters) {
 	FRESULT fr;
 	FIL current_file;
 	static uint8_t is_downloading = 0;
+	static TickType_t transfer_start_time = 0;
 
 	// Khoi tao mutex
 	xMutex_UI_Live = xSemaphoreCreateMutex();
@@ -229,6 +241,7 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Mo file (f_open read)
 						char *path = (char*) rx_packet.payload;
+						transfer_start_time = xTaskGetTickCount();
 						fr = f_open(&current_file, path, FA_READ);
 
                         // Cap nhat live status: bat dau download
@@ -266,7 +279,6 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						if (is_downloading) {
 							UINT bytes_read;
-                            TickType_t t_start = xTaskGetTickCount();
 							fr = f_read(&current_file, tx_packet.payload, MAX_PAYLOAD_SIZE, &bytes_read);
 
 							// Doc thanh cong va van con data
@@ -287,9 +299,9 @@ void Task_Storage_Handler(void *pvParameters) {
                                     }
 
                                     // Tinh toc do: KB/s
-                                    uint32_t elapsed_ms = (xTaskGetTickCount() - t_start) * portTICK_PERIOD_MS;
+                                    uint32_t elapsed_ms = (xTaskGetTickCount() - transfer_start_time) * portTICK_PERIOD_MS;
                                     if (elapsed_ms > 0) {
-                                        patch.speed_kbps = ((float) bytes_read / 1024.0f)
+                                        patch.speed_kbps = ((float) patch.bytes_processed / 1024.0f)
                                                            / (elapsed_ms / 1000.0f);
                                     }
                                     LiveStatus_Update(&patch);
@@ -326,6 +338,7 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Mo file (f_open write create always)
 						char *path = (char*) rx_packet.payload;
+						transfer_start_time = xTaskGetTickCount();
 						fr = f_open(&current_file, path, FA_CREATE_ALWAYS | FA_WRITE);
 
                         // Cap nhat live status: bat dau upload
@@ -354,7 +367,6 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Ghi payload vao file (f_write)
 						UINT bytes_written;
-                        TickType_t t_start = xTaskGetTickCount();
 						fr = f_write(&current_file, rx_packet.payload, rx_packet.length, &bytes_written);
 						uint8_t write_ok = (fr == FR_OK && bytes_written == rx_packet.length);
 
@@ -366,9 +378,9 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.transfer_status  = write_ok ? 0 : 2; // Running / Error
 
                             // Tinh toc do: KB/s
-                            uint32_t elapsed_ms = (xTaskGetTickCount() - t_start) * portTICK_PERIOD_MS;
+                            uint32_t elapsed_ms = (xTaskGetTickCount() - transfer_start_time) * portTICK_PERIOD_MS;
                             if (elapsed_ms > 0) {
-                                patch.speed_kbps = ((float) bytes_written / 1024.0f)
+                                patch.speed_kbps = ((float)patch.bytes_processed / 1024.0f)
                                                    / (elapsed_ms / 1000.0f);
                             }
                             LiveStatus_Update(&patch);
