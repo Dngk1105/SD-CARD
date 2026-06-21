@@ -32,6 +32,7 @@ void Task_Storage_Handler(void *pvParameters) {
 	xMutex_UI_Live = xSemaphoreCreateMutex();
 
     // Mount sd
+	vTaskDelay(pdMS_TO_TICKS(500));
     HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13 | GPIO_PIN_14, GPIO_PIN_RESET);
     fr = f_mount(&fs, "", 1);
     if (fr != FR_OK) {

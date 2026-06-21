@@ -115,10 +115,23 @@ typedef struct {
 } Payload_FileStart_t;
 
 // Struct trạng thái hệ thống
+typedef enum {
+	OP_IDLE = 0,
+	OP_UPLOAD,
+	OP_DOWNLOAD,
+	OP_DELETE,
+	OP_MKDIR,
+	OP_MOVE
+} UI_OpType_t;
+
 typedef struct {
     uint8_t  is_mounted;
-    uint8_t  transfer_dir;     // 0: Idle, 1: Write(PC->SD), 2: Read(SD->PC)
-    uint8_t  transfer_status;
+    uint8_t  operation_type;   // UI_OpType_t
+    uint8_t  transfer_status;  // 0: Running, 1: Paused, 2: Error, 3: Done
+    uint8_t  last_error_code;  // Ma loi FatFs (FRESULT)
+
+    char     current_filename[64]; // Ten file dang xu ly
+
     uint32_t total_bytes;
     uint32_t bytes_processed;
     uint8_t  progress_percent;
