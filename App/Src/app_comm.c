@@ -24,6 +24,8 @@ static uint8_t rx_dma_buf[RX_DMA_BUF_SIZE];
 static uint8_t tx_dma_buf[MAX_PAYLOAD_SIZE + 16]; // chua frame hoan chinh
 static uint16_t old_pos = 0;
 
+uint16_t g_uart_error_count = 0;
+
 // Parse du lieu
 static ParserState_t rx_state = STATE_WAIT_HEADER_H;
 static UART_Packet_t rx_packet;
@@ -101,7 +103,18 @@ void App_Comm_ParseByte(uint8_t byte){
 					xQueueSendFromISR(qUIReq, &rx_packet, &xHigherPriorityTaskWoken);
 				} else xQueueSendFromISR(qUartToStorage, &rx_packet, &xHigherPriorityTaskWoken);
 				portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-			}
+			} else {
+                // Sai checksum, gui 0xFF voi payload = 0xE1
+                UART_Packet_t err_pkt;
+                memset(&err_pkt, 0, sizeof(UART_Packet_t));
+                err_pkt.packet_id = PID_ACK;
+                err_pkt.cmd = CMD_ERROR_ACK;
+                err_pkt.length = 1;
+                err_pkt.payload[0] = 0xE1; // Lỗi Checksum
+                BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+                xQueueSendFromISR(qStorageToUart, &err_pkt, &xHigherPriorityTaskWoken);
+                portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+            }
 
 			rx_state = STATE_WAIT_HEADER_H; // Reset để đón khung mới
 			break;
@@ -135,6 +148,32 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
             }
             old_pos = curr_pos;
         }
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        // Xóa cờ lỗi ORE (Overrun), NE (Noise), FE (Framing)
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        
+        g_uart_error_count++;
+
+        // Gửi gói tin báo lỗi UART (0xE2)
+        UART_Packet_t err_pkt;
+        memset(&err_pkt, 0, sizeof(UART_Packet_t));
+        err_pkt.packet_id = PID_ACK;
+        err_pkt.cmd = CMD_ERROR_ACK;
+        err_pkt.length = 1;
+        err_pkt.payload[0] = 0xE2; // Lỗi Overrun/UART
+        
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xQueueSendFromISR(qStorageToUart, &err_pkt, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+        // Khởi động lại luồng nhận DMA
+        App_Comm_Init();
     }
 }
 

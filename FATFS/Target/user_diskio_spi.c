@@ -100,6 +100,8 @@ BYTE CardType;			/* Card type flags */
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
 
+uint16_t g_spi_retry_count = 0;
+
 void SPI_Timer_On(uint32_t waitTicks) {
     spiTimerTickStart = HAL_GetTick();
     spiTimerTickDelay = waitTicks;
@@ -157,44 +159,66 @@ BYTE xchg_spi (
 )
 {
 	BYTE rxDat;
-    HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 50);
+    if (HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 500) != HAL_OK) {
+        return 0xFF;
+    }
     return rxDat;
 }
 
 
 /* Receive multiple byte */
 static
-void rcvr_spi_multi (
+int rcvr_spi_multi (
 	BYTE *buff,		/* Pointer to data buffer */
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
 	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
 	HAL_StatusTypeDef dma_status = HAL_SPI_TransmitReceive_DMA(&SD_SPI_HANDLE, spi_dummy_tx, buff, btr);
+    int res = 1;
 
 	if (dma_status == HAL_OK) {
-		ulTaskNotifyTake(pdTRUE, 1000);
-	}
+		if (ulTaskNotifyTake(pdTRUE, 1000) == 0) {
+            HAL_SPI_Abort(&SD_SPI_HANDLE);
+            g_spi_retry_count++;
+            res = 0;
+        }
+	} else {
+        HAL_SPI_Abort(&SD_SPI_HANDLE);
+        g_spi_retry_count++;
+        res = 0;
+    }
 
 	spiSDTaskHandle = NULL;
+    return res;
 }
 
 
 #if _USE_WRITE
 /* Send multiple byte */
 static
-void xmit_spi_multi (
+int xmit_spi_multi (
 	const BYTE *buff,	/* Pointer to the data */
 	UINT btx			/* Number of bytes to send (even number) */
 )
 {
 	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
+    int res = 1;
 
 	if (HAL_SPI_Transmit_DMA(&SD_SPI_HANDLE, (uint8_t*)buff, btx) == HAL_OK) {
-		ulTaskNotifyTake(pdTRUE, 1000);
-	}
+		if (ulTaskNotifyTake(pdTRUE, 1000) == 0) {
+            HAL_SPI_Abort(&SD_SPI_HANDLE);
+            g_spi_retry_count++;
+            res = 0;
+        }
+	} else {
+        HAL_SPI_Abort(&SD_SPI_HANDLE);
+        g_spi_retry_count++;
+        res = 0;
+    }
 
 	spiSDTaskHandle = NULL;
+    return res;
 }
 #endif
 
@@ -289,7 +313,7 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 	} while ((token == 0xFF) && SPI_Timer_Status());
 	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
 
-	rcvr_spi_multi(buff, btr);		/* Store trailing data to the buffer */
+	if (!rcvr_spi_multi(buff, btr)) return 0;		/* Store trailing data to the buffer */
 	xchg_spi(0xFF); xchg_spi(0xFF);			/* Discard CRC */
 
 	return 1;						/* Function succeeded */
@@ -314,7 +338,7 @@ int xmit_datablock (	/* 1:OK, 0:Failed */
 
 	xchg_spi(token);					/* Send token */
 	if (token != 0xFD) {				/* Send data if token is other than StopTran */
-		xmit_spi_multi(buff, 512);		/* Data */
+		if (!xmit_spi_multi(buff, 512)) return 0;		/* Data */
 		xchg_spi(0xFF); xchg_spi(0xFF);	/* Dummy CRC */
 
 		resp = xchg_spi(0xFF);				/* Receive data resp */
@@ -527,6 +551,7 @@ inline DRESULT USER_SPI_write (
 			}
 			//That bai despiselect  de reset bus
 	        spi_bus_recovery();
+            g_spi_retry_count++;
 	        vTaskDelay(pdMS_TO_TICKS(50));
 		}
 	}

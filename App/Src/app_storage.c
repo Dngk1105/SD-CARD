@@ -25,14 +25,24 @@ static void LiveStatus_Update(UI_Transfer_Live_t *patch){
 }
 
 // Getter
-void Storage_Get_Live_Status(UI_Transfer_Live_t *out_status) {
-    if (out_status == NULL) return;
+uint8_t Storage_Get_Live_Status(UI_Transfer_Live_t *out_status) {
+    if (out_status == NULL) return 0;
 
     // Lay mutex
     if (xSemaphoreTake(xMutex_UI_Live, pdMS_TO_TICKS(1)) == pdTRUE) {
         memcpy(out_status, &g_live_status, sizeof(UI_Transfer_Live_t));
+        
+        // Cập nhật các thông số động
+        out_status->uart_error_count = g_uart_error_count;
+        out_status->spi_retry_count  = g_spi_retry_count;
+        out_status->q_uart_to_storage_len = uxQueueMessagesWaiting(qUartToStorage);
+        out_status->q_storage_to_uart_len = uxQueueMessagesWaiting(qStorageToUart);
+        out_status->free_heap_bytes  = xPortGetFreeHeapSize();
+        
         xSemaphoreGive(xMutex_UI_Live);
+        return 1;
     }
+    return 0;
 }
 
 
@@ -179,7 +189,8 @@ void Task_Storage_Handler(void *pvParameters) {
 							patch.total_bytes     = 0;
 							patch.bytes_processed = 0;
 							patch.progress_percent= 0;
-							patch.speed_kbps      = 0.0f;
+							patch.end2end_speed_kbps = 0.0f;
+                            patch.spi_pure_speed_kbps = 0.0f;
 							LiveStatus_Update(&patch);
 						}
 
@@ -244,6 +255,10 @@ void Task_Storage_Handler(void *pvParameters) {
 						transfer_start_time = xTaskGetTickCount();
 						fr = f_open(&current_file, path, FA_READ);
 
+                        // Reset bo dem loi cho phien truyen moi
+                        g_uart_error_count = 0;
+                        g_spi_retry_count = 0;
+
                         // Cap nhat live status: bat dau download
                         {
                             UI_Transfer_Live_t patch = g_live_status;
@@ -253,7 +268,8 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.total_bytes      = (fr == FR_OK) ? f_size(&current_file) : 0;
                             patch.bytes_processed  = 0;
                             patch.progress_percent = 0;
-                            patch.speed_kbps       = 0.0f;
+                            patch.end2end_speed_kbps = 0.0f;
+                            patch.spi_pure_speed_kbps = 0.0f;
                             strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
                             LiveStatus_Update(&patch);
                         }
@@ -279,7 +295,9 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						if (is_downloading) {
 							UINT bytes_read;
+                            TickType_t t_start = xTaskGetTickCount();
 							fr = f_read(&current_file, tx_packet.payload, MAX_PAYLOAD_SIZE, &bytes_read);
+                            TickType_t t_end = xTaskGetTickCount();
 
 							// Doc thanh cong va van con data
 							if (fr == FR_OK && bytes_read > 0) {
@@ -301,9 +319,15 @@ void Task_Storage_Handler(void *pvParameters) {
                                     // Tinh toc do: KB/s
                                     uint32_t elapsed_ms = (xTaskGetTickCount() - transfer_start_time) * portTICK_PERIOD_MS;
                                     if (elapsed_ms > 0) {
-                                        patch.speed_kbps = ((float) patch.bytes_processed / 1024.0f)
+                                        patch.end2end_speed_kbps = ((float) patch.bytes_processed / 1024.0f)
                                                            / (elapsed_ms / 1000.0f);
                                     }
+                                    
+                                    uint32_t spi_ms = (t_end - t_start) * portTICK_PERIOD_MS;
+                                    if (spi_ms > 0 && bytes_read > 0) {
+                                        patch.spi_pure_speed_kbps = ((float)bytes_read / 1024.0f) / (spi_ms / 1000.0f);
+                                    }
+                                    
                                     LiveStatus_Update(&patch);
                                 }
 							}
@@ -319,7 +343,8 @@ void Task_Storage_Handler(void *pvParameters) {
                                     patch.last_error_code  = (uint8_t) fr;
                                     patch.progress_percent = (fr == FR_OK) ? 100 : patch.progress_percent;
                                     patch.operation_type   = OP_IDLE;
-                                    patch.speed_kbps       = 0.0f;
+                                    patch.end2end_speed_kbps = 0.0f;
+                                    patch.spi_pure_speed_kbps = 0.0f;
                                     LiveStatus_Update(&patch);
                                 }
 
@@ -341,6 +366,10 @@ void Task_Storage_Handler(void *pvParameters) {
 						transfer_start_time = xTaskGetTickCount();
 						fr = f_open(&current_file, path, FA_CREATE_ALWAYS | FA_WRITE);
 
+                        // Reset bo dem loi cho phien truyen moi
+                        g_uart_error_count = 0;
+                        g_spi_retry_count = 0;
+
                         // Cap nhat live status: bat dau upload
                         {
                             UI_Transfer_Live_t patch = g_live_status;
@@ -350,7 +379,8 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.bytes_processed  = 0;
                             patch.total_bytes      = 0; // Chua biet truoc, PC se gui tung chunk
                             patch.progress_percent = 0;
-                            patch.speed_kbps       = 0.0f;
+                            patch.end2end_speed_kbps = 0.0f;
+                            patch.spi_pure_speed_kbps = 0.0f;
                             strncpy(patch.current_filename, path, sizeof(patch.current_filename) - 1);
                             LiveStatus_Update(&patch);
                         }
@@ -367,7 +397,9 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Ghi payload vao file (f_write)
 						UINT bytes_written;
+                        TickType_t t_start = xTaskGetTickCount();
 						fr = f_write(&current_file, rx_packet.payload, rx_packet.length, &bytes_written);
+                        TickType_t t_end = xTaskGetTickCount();
 						uint8_t write_ok = (fr == FR_OK && bytes_written == rx_packet.length);
 
                         // Cap nhat tien do upload
@@ -380,9 +412,15 @@ void Task_Storage_Handler(void *pvParameters) {
                             // Tinh toc do: KB/s
                             uint32_t elapsed_ms = (xTaskGetTickCount() - transfer_start_time) * portTICK_PERIOD_MS;
                             if (elapsed_ms > 0) {
-                                patch.speed_kbps = ((float)patch.bytes_processed / 1024.0f)
+                                patch.end2end_speed_kbps = ((float)patch.bytes_processed / 1024.0f)
                                                    / (elapsed_ms / 1000.0f);
                             }
+                            
+                            uint32_t spi_ms = (t_end - t_start) * portTICK_PERIOD_MS;
+                            if (spi_ms > 0 && bytes_written > 0) {
+                                patch.spi_pure_speed_kbps = ((float)bytes_written / 1024.0f) / (spi_ms / 1000.0f);
+                            }
+                            
                             LiveStatus_Update(&patch);
                         }
 
@@ -407,7 +445,8 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.last_error_code  = (uint8_t) fr;
                             patch.progress_percent = (fr == FR_OK) ? 100 : patch.progress_percent;
                             patch.operation_type   = OP_IDLE;
-                            patch.speed_kbps       = 0.0f;
+                            patch.end2end_speed_kbps = 0.0f;
+                            patch.spi_pure_speed_kbps = 0.0f;
                             LiveStatus_Update(&patch);
                         }
 
@@ -461,14 +500,14 @@ void Task_UIReq_Handler(void *pvParameters){
 			tx_packet.packet_id = PID_ACK;
 
 			if (rx_packet.cmd == CMD_GET_UI_STATUS_REQ){
-				Storage_Get_Live_Status(&ui_data);
+				if (Storage_Get_Live_Status(&ui_data)) {
+                    // goi packet
+                    tx_packet.cmd = CMD_GET_UI_STATUS_ACK;
+                    tx_packet.length = sizeof(UI_Transfer_Live_t);
+                    memcpy(tx_packet.payload, &ui_data, tx_packet.length);
 
-				// goi packet
-				tx_packet.cmd = CMD_GET_UI_STATUS_ACK;
-				tx_packet.length = sizeof(UI_Transfer_Live_t);
-				memcpy(tx_packet.payload, &ui_data, tx_packet.length);
-
-				xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+                    xQueueSend(qStorageToUart, &tx_packet, portMAX_DELAY);
+                }
 			}
 		}
 	}

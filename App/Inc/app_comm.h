@@ -135,10 +135,23 @@ typedef struct {
     uint32_t total_bytes;
     uint32_t bytes_processed;
     uint8_t  progress_percent;
-    float    speed_kbps;
+
+    float    end2end_speed_kbps;  // Tốc độ thực tế tổng thể (Tốc độ PC nhận/gửi được)
+    float    spi_pure_speed_kbps; // Tốc độ thuần của thẻ SD (Chỉ đo lúc f_write/f_read)
+
+    uint16_t uart_error_count;    // Đếm số lần bị nhiễu dây/Overrun (Đã tự phục hồi)
+    uint16_t spi_retry_count;     // Đếm số lần thẻ SD bị Busy quá lâu hoặc SPI DMA Abort
+    
+    uint8_t  q_uart_to_storage_len; // Số gói tin đang chờ ghi vào SD (Max 5)
+    uint8_t  q_storage_to_uart_len; // Số gói tin đang chờ đẩy lên PC (Max 5)
+    
+    uint32_t free_heap_bytes;     // Báo cáo số RAM (Heap) còn trống của FreeRTOS
 } UI_Transfer_Live_t;
 
 #pragma pack(pop)
+
+extern uint16_t g_uart_error_count;
+extern uint16_t g_spi_retry_count;
 
 
 void App_Comm_Init(void);
