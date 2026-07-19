@@ -40,7 +40,7 @@ void App_FreeRTOS_Init(void) {
     xTaskCreate(Task_Storage_Handler, "Storage", 2048 , NULL, 40, &hStorageTask);
     xTaskCreate(Task_Comm_Handler, "Comm", 1024, NULL, 39, &hCommTask);
     xTaskCreate(Task_UIReq_Handler, "UIReq", 1024, NULL, 41, &hUIReq);
-    xTaskCreate(Task_LCD_Handler, "LCD", 1024, NULL, 41, &hLCD);
+    xTaskCreate(Task_LCD_Handler, "LCD", 1024, NULL, 38, &hLCD);
 
     semUartTx = xSemaphoreCreateBinary();
 }
