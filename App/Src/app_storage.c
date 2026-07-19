@@ -361,8 +361,11 @@ void Task_Storage_Handler(void *pvParameters) {
 					// UPLOAD (PC -> SD)
 					case CMD_FILE_WRITE_START_REQ:
 					{
-						// Mo file (f_open write create always)
-						char *path = (char*) rx_packet.payload;
+						// Extract file size and path from payload
+						// Payload format: [4 bytes file_size][path string\0]
+						uint32_t file_size = *((uint32_t*)rx_packet.payload);
+						char *path = (char*)(rx_packet.payload + 4);
+						
 						transfer_start_time = xTaskGetTickCount();
 						fr = f_open(&current_file, path, FA_CREATE_ALWAYS | FA_WRITE);
 
@@ -377,7 +380,7 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.transfer_status  = (fr == FR_OK) ? 0 : 2; // Running / Error
                             patch.last_error_code  = (uint8_t) fr;
                             patch.bytes_processed  = 0;
-                            patch.total_bytes      = 0; // Chua biet truoc, PC se gui tung chunk
+                            patch.total_bytes      = (fr == FR_OK) ? file_size : 0; // Đã parse được size từ payload
                             patch.progress_percent = 0;
                             patch.end2end_speed_kbps = 0.0f;
                             patch.spi_pure_speed_kbps = 0.0f;
@@ -408,6 +411,12 @@ void Task_Storage_Handler(void *pvParameters) {
                             patch.bytes_processed += bytes_written;
                             patch.last_error_code  = (uint8_t) fr;
                             patch.transfer_status  = write_ok ? 0 : 2; // Running / Error
+
+                            if (patch.total_bytes > 0) {
+                                patch.progress_percent = (uint8_t)(
+                                    (patch.bytes_processed * 100UL) / patch.total_bytes
+                                );
+                            }
 
                             // Tinh toc do: KB/s
                             uint32_t elapsed_ms = (xTaskGetTickCount() - transfer_start_time) * portTICK_PERIOD_MS;
