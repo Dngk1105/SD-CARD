@@ -35,9 +35,9 @@ void App_FreeRTOS_Init(void) {
 
 
 
-    xTaskCreate(Task_Storage_Handler, "Storage", 2048 , NULL, 3, &hStorageTask);
-    xTaskCreate(Task_Comm_Handler, "Comm", 1024, NULL, 2, &hCommTask);
-    xTaskCreate(Task_UIReq_Handler, "UIReq", 1024, NULL, 4, &hUIReq);
+    xTaskCreate(Task_Storage_Handler, "Storage", 2048 , NULL, 40, &hStorageTask);
+    xTaskCreate(Task_Comm_Handler, "Comm", 1024, NULL, 39, &hCommTask);
+    xTaskCreate(Task_UIReq_Handler, "UIReq", 1024, NULL, 41, &hUIReq);
 
     semUartTx = xSemaphoreCreateBinary();
 }
