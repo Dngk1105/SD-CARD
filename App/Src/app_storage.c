@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 
+// TIM7
+extern TIM_HandleTypeDef htim7;
+
 // Semaphore cho bien trang thai (UI)
 UI_Transfer_Live_t g_live_status = {0};
 SemaphoreHandle_t xMutex_UI_Live = NULL;
@@ -76,6 +79,7 @@ void Task_Storage_Handler(void *pvParameters) {
         g_live_status.is_mounted = 1;
     }
 
+    HAL_TIM_Base_Start(&htim7);
     while (1){
     	// Cho du lieu trong queue gui tu uart
     	if (xQueueReceive(qUartToStorage, &rx_packet, portMAX_DELAY) == pdPASS){
@@ -295,9 +299,9 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						if (is_downloading) {
 							UINT bytes_read;
-                            TickType_t t_start = xTaskGetTickCount();
+                            uint16_t t_start = __HAL_TIM_GET_COUNTER(&htim7);
 							fr = f_read(&current_file, tx_packet.payload, MAX_PAYLOAD_SIZE, &bytes_read);
-                            TickType_t t_end = xTaskGetTickCount();
+							uint16_t t_end = __HAL_TIM_GET_COUNTER(&htim7);
 
 							// Doc thanh cong va van con data
 							if (fr == FR_OK && bytes_read > 0) {
@@ -323,9 +327,9 @@ void Task_Storage_Handler(void *pvParameters) {
                                                            / (elapsed_ms / 1000.0f);
                                     }
                                     
-                                    uint32_t spi_ms = (t_end - t_start) * portTICK_PERIOD_MS;
-                                    if (spi_ms > 0 && bytes_read > 0) {
-                                        patch.spi_pure_speed_kbps = ((float)bytes_read / 1024.0f) / (spi_ms / 1000.0f);
+                                    uint32_t spi_micros = t_end - t_start;
+                                    if (spi_micros > 0 && bytes_read > 0) {
+                                        patch.spi_pure_speed_kbps = ((float)bytes_read / 1024.0f) / (spi_micros / 1000000.0f);
                                     }
                                     
                                     LiveStatus_Update(&patch);
@@ -400,9 +404,9 @@ void Task_Storage_Handler(void *pvParameters) {
 					{
 						// Ghi payload vao file (f_write)
 						UINT bytes_written;
-                        TickType_t t_start = xTaskGetTickCount();
+						uint16_t t_start = __HAL_TIM_GET_COUNTER(&htim7);
 						fr = f_write(&current_file, rx_packet.payload, rx_packet.length, &bytes_written);
-                        TickType_t t_end = xTaskGetTickCount();
+						uint16_t t_end = __HAL_TIM_GET_COUNTER(&htim7);
 						uint8_t write_ok = (fr == FR_OK && bytes_written == rx_packet.length);
 
                         // Cap nhat tien do upload
@@ -425,10 +429,10 @@ void Task_Storage_Handler(void *pvParameters) {
                                                    / (elapsed_ms / 1000.0f);
                             }
                             
-                            uint32_t spi_ms = (t_end - t_start) * portTICK_PERIOD_MS;
-                            if (spi_ms > 0 && bytes_written > 0) {
-                                patch.spi_pure_speed_kbps = ((float)bytes_written / 1024.0f) / (spi_ms / 1000.0f);
-                            }
+                            uint32_t spi_micros = t_end - t_start;
+							if (spi_micros > 0 && bytes_written > 0) {
+								patch.spi_pure_speed_kbps = ((float)bytes_written / 1024.0f) / (spi_micros / 1000000.0f);
+							}
                             
                             LiveStatus_Update(&patch);
                         }
