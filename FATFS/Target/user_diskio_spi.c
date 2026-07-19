@@ -28,6 +28,9 @@
 #include "user_diskio_spi.h"
 #include <string.h>
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 //Make sure you set #define SD_SPI_HANDLE as some hspix in main.h
 //Make sure you set #define SD_CS_GPIO_Port as some GPIO port in main.h
 //Make sure you set #define SD_CS_Pin as some GPIO pin in main.h
@@ -37,7 +40,7 @@ extern SPI_HandleTypeDef SD_SPI_HANDLE;
 
 //(Note that the _256 is used as a mask to clear the prescalar bits as it provides binary 111 in the correct position)
 // Sua thanh ghi CR1 de cau hinh lai prescaler cua SPI
-#define FCLK_SLOW() { MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_BAUDRATEPRESCALER_256, SPI_BAUDRATEPRESCALER_128); }	/* Set SCLK = slow, approx 280 KBits/s*/
+#define FCLK_SLOW() { MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_BAUDRATEPRESCALER_256, SPI_BAUDRATEPRESCALER_256); }	/* Set SCLK = slow, approx 280 KBits/s*/
 #define FCLK_FAST() { MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_BAUDRATEPRESCALER_256, SPI_BAUDRATEPRESCALER_8); }	/* Set SCLK = fast, approx 4.5 MBits/s */
 
 #define CS_HIGH()	{HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);}
@@ -81,9 +84,11 @@ extern SPI_HandleTypeDef SD_SPI_HANDLE;
 static volatile
 DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
 
-// Co nhan dma hoan thanh day/thu du lieu
-volatile uint8_t spi_dma_tx_cplt = 0;
-volatile uint8_t spi_dma_rx_cplt = 0;
+//// Co nhan dma hoan thanh day/thu du lieu
+//volatile uint8_t spi_dma_tx_cplt = 0;
+//volatile uint8_t spi_dma_rx_cplt = 0;
+
+TaskHandle_t spiSDTaskHandle = NULL;
 
 // mang dummy de thuc hien receive du lieu trong che do song cong
 uint8_t spi_dummy_tx[512];
@@ -94,6 +99,8 @@ BYTE CardType;			/* Card type flags */
 // Bien de dat timer dung thu vien HAL
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
+
+uint16_t g_spi_retry_count = 0;
 
 void SPI_Timer_On(uint32_t waitTicks) {
     spiTimerTickStart = HAL_GetTick();
@@ -111,17 +118,27 @@ uint8_t SPI_Timer_Status() {
  * ,HAL_SPI_TransmitReceive_DMA() hoan tat
  */
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) spi_dma_tx_cplt = 1;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) spi_dma_rx_cplt = 1;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
-	if (hspi->Instance == SD_SPI_HANDLE.Instance) {
-        spi_dma_rx_cplt = 1;
-    }
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
+		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
 }
 
 /*-----------------------------------------------------------------------*/
@@ -142,42 +159,77 @@ BYTE xchg_spi (
 )
 {
 	BYTE rxDat;
-    HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 50);
+    if (HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 500) != HAL_OK) {
+        return 0xFF;
+    }
     return rxDat;
 }
 
 
 /* Receive multiple byte */
 static
-void rcvr_spi_multi (
+int rcvr_spi_multi (
 	BYTE *buff,		/* Pointer to data buffer */
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
-	spi_dma_rx_cplt = 0;
+	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
 	HAL_StatusTypeDef dma_status = HAL_SPI_TransmitReceive_DMA(&SD_SPI_HANDLE, spi_dummy_tx, buff, btr);
+    int res = 1;
 
 	if (dma_status == HAL_OK) {
-		while(!spi_dma_rx_cplt) {}
-	}
+		if (ulTaskNotifyTake(pdTRUE, 1000) == 0) {
+            HAL_SPI_Abort(&SD_SPI_HANDLE);
+            g_spi_retry_count++;
+            res = 0;
+        }
+	} else {
+        HAL_SPI_Abort(&SD_SPI_HANDLE);
+        g_spi_retry_count++;
+        res = 0;
+    }
+
+	spiSDTaskHandle = NULL;
+    return res;
 }
 
 
 #if _USE_WRITE
 /* Send multiple byte */
 static
-void xmit_spi_multi (
+int xmit_spi_multi (
 	const BYTE *buff,	/* Pointer to the data */
 	UINT btx			/* Number of bytes to send (even number) */
 )
 {
-	spi_dma_tx_cplt = 0;
+	spiSDTaskHandle = xTaskGetCurrentTaskHandle();
+    int res = 1;
+
 	if (HAL_SPI_Transmit_DMA(&SD_SPI_HANDLE, (uint8_t*)buff, btx) == HAL_OK) {
-		while(!spi_dma_tx_cplt) {}
-	}
+		if (ulTaskNotifyTake(pdTRUE, 1000) == 0) {
+            HAL_SPI_Abort(&SD_SPI_HANDLE);
+            g_spi_retry_count++;
+            res = 0;
+        }
+	} else {
+        HAL_SPI_Abort(&SD_SPI_HANDLE);
+        g_spi_retry_count++;
+        res = 0;
+    }
+
+	spiSDTaskHandle = NULL;
+    return res;
 }
 #endif
 
+/* Reset SPI bus khi the bi treo giua chung.
+ * Gui 80 clock voi CS HIGH de buoc the thoat khoi trang thai loi. */
+static void spi_bus_recovery(void)
+{
+    CS_HIGH();
+    for (uint8_t i = 0; i < 10; i++)   /* 10 byte = 80 clock */
+        xchg_spi(0xFF);
+}
 
 /*-----------------------------------------------------------------------*/
 /* Wait for card ready                                                   */
@@ -199,6 +251,8 @@ int wait_ready (	/* 1:Ready, 0:Timeout */
 	do {
 		d = xchg_spi(0xFF);
 		/* This loop takes a time. Insert rot_rdq() here for multitask envilonment. */
+		//vTaskDelay(1);
+		taskYIELD();
 	} while (d != 0xFF && ((HAL_GetTick() - waitSpiTimerTickStart) < waitSpiTimerTickDelay));	/* Wait for card goes ready or timeout */
 
 	return (d == 0xFF) ? 1 : 0;
@@ -229,7 +283,7 @@ int spiselect (void)	/* 1:OK, 0:Timeout */
 {
 	CS_LOW();		/* Set CS# low */
 	xchg_spi(0xFF);	/* Dummy clock (force DO enabled) */
-	if (wait_ready(500)) return 1;	/* Wait for card ready */
+	if (wait_ready(2000)) return 1;	/* Wait for card ready */
 
 	despiselect();
 	return 0;	/* Timeout */
@@ -254,10 +308,12 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 	do {							/* Wait for DataStart token in timeout of 200ms */
 		token = xchg_spi(0xFF);
 		/* This loop will take a time. Insert rot_rdq() here for multitask envilonment. */
+		//vTaskDelay(1);
+		taskYIELD();
 	} while ((token == 0xFF) && SPI_Timer_Status());
 	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
 
-	rcvr_spi_multi(buff, btr);		/* Store trailing data to the buffer */
+	if (!rcvr_spi_multi(buff, btr)) return 0;		/* Store trailing data to the buffer */
 	xchg_spi(0xFF); xchg_spi(0xFF);			/* Discard CRC */
 
 	return 1;						/* Function succeeded */
@@ -278,16 +334,16 @@ int xmit_datablock (	/* 1:OK, 0:Failed */
 {
 	BYTE resp;
 
-
-	if (!wait_ready(500)) return 0;		/* Wait for card ready */
+	if (!wait_ready(2000)) return 0;		/* Wait for card ready */
 
 	xchg_spi(token);					/* Send token */
 	if (token != 0xFD) {				/* Send data if token is other than StopTran */
-		xmit_spi_multi(buff, 512);		/* Data */
+		if (!xmit_spi_multi(buff, 512)) return 0;		/* Data */
 		xchg_spi(0xFF); xchg_spi(0xFF);	/* Dummy CRC */
 
 		resp = xchg_spi(0xFF);				/* Receive data resp */
 		if ((resp & 0x1F) != 0x05) return 0;	/* Function fails if the data packet was not accepted */
+		if (!wait_ready(2000)) return 0;
 	}
 	return 1;
 }
@@ -467,8 +523,8 @@ inline DRESULT USER_SPI_read (
 
 
 /*-----------------------------------------------------------------------*/
-/* Write sector(s)
- * Can kiem tra CardType de convert LBA->BA
+//* Write sector(s)
+// * Can kiem tra CardType de convert LBA->BA
 /*-----------------------------------------------------------------------*/
 
 #if _USE_WRITE
@@ -486,9 +542,17 @@ inline DRESULT USER_SPI_write (
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA ==> BA conversion (byte addressing cards) */
 
 	if (count == 1) {	/* Single sector write */
-		if ((send_cmd(CMD24, sector) == 0)	/* WRITE_BLOCK */
-			&& xmit_datablock(buff, 0xFE)) {
-			count = 0;
+		UINT retry = 3;
+		while (retry--){
+			if ((send_cmd(CMD24, sector) == 0)	/* WRITE_BLOCK */
+				&& xmit_datablock(buff, 0xFE)) {
+				count = 0;
+				break;
+			}
+			//That bai despiselect  de reset bus
+	        spi_bus_recovery();
+            g_spi_retry_count++;
+	        vTaskDelay(pdMS_TO_TICKS(50));
 		}
 	}
 	else {				/* Multiple sector write */
@@ -531,7 +595,10 @@ inline DRESULT USER_SPI_ioctl (
 
 	switch (cmd) {
 	case CTRL_SYNC :		/* Wait for end of internal write process of the drive */
-		if (spiselect()) res = RES_OK;
+		if (spiselect()){
+			res = RES_OK;
+			despiselect();
+		}
 		break;
 
 	case GET_SECTOR_COUNT :	/* Get drive capacity in unit of sector (DWORD) */

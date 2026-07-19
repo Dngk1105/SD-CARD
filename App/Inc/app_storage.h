@@ -13,11 +13,14 @@
 #include "fatfs.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
+#include <app_comm.h>
 
 #define BENCH_FILE_SIZE 1048576
 #define BENCH_CHUNK_SIZE 4096
 
 
 void Task_Storage_Handler(void *pvParameters);
+void Task_UIReq_Handler(void *pvParameters);
+uint8_t Storage_Get_Live_Status(UI_Transfer_Live_t *out_status);	// Getter lay UI Status
 
 #endif /* INC_APP_STORAGE_H_ */
