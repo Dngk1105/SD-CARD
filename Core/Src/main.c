@@ -25,6 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_main.h"
 #include <string.h>
+#include "ILI9341_STM32_Driver.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,8 +45,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi5;
 DMA_HandleTypeDef hdma_spi1_rx;
 DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_spi5_tx;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_tx;
@@ -59,6 +62,8 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+extern void LCD_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
+extern void SD_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,6 +72,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_SPI5_Init(void);
 void StartDefaultTask(void *argument);
 
 static void MX_NVIC_Init(void);
@@ -112,11 +118,13 @@ int main(void)
   MX_SPI1_Init();
   MX_FATFS_Init();
   MX_USART1_UART_Init();
+  MX_SPI5_Init();
 
   /* Initialize interrupts */
   MX_NVIC_Init();
   /* USER CODE BEGIN 2 */
-
+  ILI9341_Init();
+  ILI9341_SetRotation(SCREEN_HORIZONTAL_1);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -276,6 +284,44 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief SPI5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI5_Init(void)
+{
+
+  /* USER CODE BEGIN SPI5_Init 0 */
+
+  /* USER CODE END SPI5_Init 0 */
+
+  /* USER CODE BEGIN SPI5_Init 1 */
+
+  /* USER CODE END SPI5_Init 1 */
+  /* SPI5 parameter configuration*/
+  hspi5.Instance = SPI5;
+  hspi5.Init.Mode = SPI_MODE_MASTER;
+  hspi5.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi5.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi5.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi5.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi5.Init.NSS = SPI_NSS_SOFT;
+  hspi5.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi5.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi5.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi5.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi5.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI5_Init 2 */
+
+  /* USER CODE END SPI5_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -321,6 +367,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+  /* DMA2_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream4_IRQn);
   /* DMA2_Stream7_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
@@ -340,15 +389,31 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, GPIO_PIN_13|GPIO_PIN_14, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PC2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SD_CS_Pin */
   GPIO_InitStruct.Pin = SD_CS_Pin;
@@ -356,6 +421,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PD12 PD13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PG13 PG14 */
   GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14;
@@ -370,6 +442,27 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+// Khai báo extern để main biết 2 hàm xử lý của thư viện nằm ở file khác
+extern void ILI9341_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
+extern void SD_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    // Nếu ngắt xảy ra trên bộ SPI1 (Thẻ nhớ hoặc màn hình tùy cấu hình của bạn)
+    if (hspi->Instance == SPI1)
+    {
+        // Gọi hàm xử lý của thư viện dùng SPI1
+        // Ví dụ ở đây tôi giả định SPI1 cho Thẻ nhớ:
+        SD_SPI_TxCpltCallback(hspi);
+    }
+    // Nếu ngắt xảy ra trên bộ SPI5
+    else if (hspi->Instance == SPI5)
+    {
+        // Gọi hàm xử lý của thư viện dùng SPI5 (Màn hình ILI9341)
+        LCD_SPI_TxCpltCallback(hspi);
+    }
+}
 
 /* USER CODE END 4 */
 

@@ -7,6 +7,7 @@
 #include "app_freertos.h"
 #include "app_storage.h"
 #include "app_comm.h"
+#include "app_lcd.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -17,6 +18,7 @@
 TaskHandle_t hStorageTask;
 TaskHandle_t hCommTask;
 TaskHandle_t hUIReq;
+TaskHandle_t hLCD;
 
 //2 Queue cho 2 chieu gui du lieu
 QueueHandle_t qUartToStorage;
@@ -38,6 +40,7 @@ void App_FreeRTOS_Init(void) {
     xTaskCreate(Task_Storage_Handler, "Storage", 2048 , NULL, 40, &hStorageTask);
     xTaskCreate(Task_Comm_Handler, "Comm", 1024, NULL, 39, &hCommTask);
     xTaskCreate(Task_UIReq_Handler, "UIReq", 1024, NULL, 41, &hUIReq);
+    xTaskCreate(Task_LCD_Handler, "LCD", 1024, NULL, 41, &hLCD);
 
     semUartTx = xSemaphoreCreateBinary();
 }

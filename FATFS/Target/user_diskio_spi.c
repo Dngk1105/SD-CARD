@@ -117,7 +117,7 @@ uint8_t SPI_Timer_Status() {
  * nghia la khi cac ham HAL_SPI_Transmit_DMA(), HAL_SPI_Receive_DMA()
  * ,HAL_SPI_TransmitReceive_DMA() hoan tat
  */
-void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+void SD_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 	if (hspi->Instance == SD_SPI_HANDLE.Instance && spiSDTaskHandle != NULL) {
 		vTaskNotifyGiveFromISR(spiSDTaskHandle, &xHigherPriorityTaskWoken);
