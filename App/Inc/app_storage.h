@@ -13,6 +13,7 @@
 #include "fatfs.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
+#include <app_comm.h>
 
 #define BENCH_FILE_SIZE 1048576
 #define BENCH_CHUNK_SIZE 4096
