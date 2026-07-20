@@ -125,8 +125,8 @@ static void LCD_UpdateDynamicFields(const UI_Transfer_Live_t *cur, const UI_Tran
     }
 
     // --- Status + operation type ---
-    if (cur->transfer_status != prev->transfer_status ||
-        cur->operation_type  != prev->operation_type) {
+    if ((cur->transfer_status != prev->transfer_status ||
+        cur->operation_type  != prev->operation_type) && cur->is_mounted) {
         snprintf(buf, sizeof(buf), "%s (%s)", status_str(cur->transfer_status), op_type_str(cur->operation_type));
         uint16_t color = (cur->transfer_status == 2) ? COLOR_ERROR : COLOR_VALUE;
         LCD_PrintField(COL_VALUE, ROW_STATUS, 200, 12, buf, color);
@@ -192,16 +192,23 @@ void Task_LCD_Handler(void *pvParameters)
     memset(&prev_status, 0xFF, sizeof(prev_status)); // ép khác lần đầu để full-draw
 
     ILI9341_DrawFilledRectangleCoord(0, 0, LCD_WIDTH, LCD_HEIGHT, COLOR_BG); // xóa toàn màn hình
-    LCD_DrawStaticLayout();
 
     TickType_t last_wake = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(200); // 5Hz
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    uint8_t ret = Storage_Get_Live_Status(&cur_status);
+    if (ret && cur_status.is_mounted){
+		LCD_DrawStaticLayout();
+    } else {
+        ILI9341_DrawText("SD NOT FOUND", FONT_LABEL, COL_LABEL, ROW_FILENAME,  COLOR_ERROR, COLOR_BG);
+    }
 
     for (;;) {
         uint8_t ret = Storage_Get_Live_Status(&cur_status);
 
         if (ret == 1) {
-            LCD_UpdateDynamicFields(&cur_status, &prev_status);
+            if (cur_status.is_mounted) LCD_UpdateDynamicFields(&cur_status, &prev_status);
             prev_status = cur_status;
         }
 
